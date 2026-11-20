@@ -32,6 +32,17 @@ Khán giả xem phiên LIVE trực tiếp tham gia vào đường đua sông nư
 
 ---
 
+## 📥 Tải Bộ Cài Đặt Windows 1-Click (`.EXE`) — Không Cần Cài Node.js!
+
+Người dùng Windows 10/11 có thể tải trực tiếp **1 file cài đặt `.exe` duy nhất** (đã tích hợp sẵn Node.js Runtime, giao diện cài đặt Tiếng Việt, tự động tạo biểu tượng ngoài màn hình Desktop và chạy ngầm không hiện cửa sổ CMD đen):
+
+| Phiên bản tải về | File cài đặt / Thực thi | Đặc điểm nổi bật | Link Tải Trực Tiếp (GitHub Releases & Repo) |
+| :--- | :--- | :--- | :--- |
+| **💿 Bộ Cài Đặt Tự Động 1-Click *(Khuyên dùng cho Người dùng cuối)*** | **`LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe`** | Giao diện cài đặt Tiếng Việt • Tích hợp sẵn `node.exe` • Tự tạo icon Desktop & mở ngay Bảng điều khiển | [**⬇️ Tải `LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe` (GitHub Release)**](https://github.com/duongbirken2510/LIVE-BoatRacing-Tiktok/releases/download/v2.0.0/LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe) <br> *(Hoặc tải trong thư mục [`Release_Windows/`](./Release_Windows/LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe))* |
+| **🚀 File Chạy Trực Tiếp Không Cửa Sổ Đen *(Khi tải mã nguồn)*** | **`LIVE-BoatRacing-Tiktok.exe`** | Nhấp đúp chạy ngầm máy chủ và mở ngay cửa sổ điều khiển App Mode | [**⬇️ Tải `LIVE-BoatRacing-Tiktok.exe`**](./LIVE-BoatRacing-Tiktok.exe) |
+
+---
+
 ## 🌟 6 Điểm Đột Phá Của Phiên Bản `v2.0`
 
 | Hạng mục nâng cấp (`v2.0`) | Chi tiết công nghệ & Trải nghiệm thực tế | Giá trị mang lại cho Chủ kênh |

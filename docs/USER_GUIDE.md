@@ -29,13 +29,22 @@
 
 # 🇻🇳 PHẦN A — HƯỚNG DẪN SỬ DỤNG TIẾNG VIỆT (TỪ A ĐẾN Z)
 
-## 1. Bước 1: Cài đặt & Khởi động nhanh bằng 1 cú nhấp đúp (`BAT-LIVE.bat`)
+## 1. Bước 1: Cài đặt & Khởi động nhanh bằng Bộ cài `.EXE` 1-Click hoặc `BAT-LIVE.bat`
 
-### 💻 A. Trên máy tính Windows 10 / 11 (64-bit) — Khuyên dùng
+### 💻 A. Trên máy tính Windows 10 / 11 (64-bit) — 2 Cách Cài Đặt
+
+#### 🌟 Cách 1 (Khuyên dùng cho người dùng phổ thông — Cài bằng 1 file `.EXE` duy nhất, KHÔNG cần cài Node.js):
+1. Tải bộ cài đặt chính thức: **[`LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe`](https://github.com/duongbirken2510/LIVE-BoatRacing-Tiktok/releases/download/v2.0.0/LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe)** (hoặc lấy trong thư mục `Release_Windows/LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe`).
+2. Nhấp đúp vào file **`LIVE-BoatRacing-Tiktok-v2.0.0-Setup.exe`**.
+   - *(Nếu Windows hiện bảng xanh **Windows protected your PC / SmartScreen**, bấm **More info (Thông tin thêm)** ➔ bấm **Run anyway (Vẫn chạy)**).*
+3. Trên cửa sổ cài đặt Tiếng Việt, bấm nút màu vàng **`🚀 CÀI ĐẶT NGAY (1-CLICK INSTALL)`**.
+4. Sau 5 giây, phần mềm tự động tạo biểu tượng **LIVE-BoatRacing-Tiktok** (hình thuyền rồng vàng) ngoài màn hình Desktop và tự mở Bảng điều khiển tại **`http://localhost:3010`** mà không hiện cửa sổ CMD đen!
+
+#### 🛠️ Cách 2 (Chạy từ thư mục mã nguồn bằng `LIVE-BoatRacing-Tiktok.exe` hoặc `BAT-LIVE.bat`):
 1. **Cài đặt Node.js (chỉ cần làm 1 lần duy nhất):**
    - Tải và cài đặt bản **Node.js 20 LTS trở lên** tại [https://nodejs.org](https://nodejs.org).
 2. **Khởi động Game ngay lập tức:**
-   - Mở thư mục dự án, nhấp đúp chuột vào file **`BAT-LIVE.bat`**.
+   - Mở thư mục dự án, nhấp đúp chuột vào **`LIVE-BoatRacing-Tiktok.exe`** (chạy ẩn không hiện cửa sổ đen) hoặc file **`BAT-LIVE.bat`**.
    - *(Nếu Windows hiện bảng xanh **Windows protected your PC / SmartScreen**, bạn bấm vào chữ **More info (Thông tin thêm)** ➔ bấm **Run anyway (Vẫn chạy)**).*
    - Lần đầu tiên chạy, cửa sổ sẽ tự động tải thư viện `node_modules` trong khoảng 1–2 phút, sau đó tự động mở trang **Bảng Điều Khiển (Dashboard)** trên trình duyệt tại địa chỉ:
      ```text
