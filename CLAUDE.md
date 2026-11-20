@@ -1,47 +1,14 @@
-# Ghe Ngo 34 Tỉnh: ghi chú cho Claude
+# LIVE-BOAT RACING TIKTOK (v2.0): Ghi chú kiến trúc & luật chơi
 
-> File này mô tả RIÊNG game này. Luật chung cho mọi game nằm ở `E:\01_Projects\VibeCode\CLAUDE.md`.
-> Khi chủ kênh chốt một quyết định (câu đọc, màu, luật chơi), ghi vào mục "Quyết định của chủ kênh".
+## Kiến trúc tổng thể
 
-## Ý tưởng
-
-Game đua ghe ngo cho TikTok LIVE: 34 tỉnh thành thi nhau, người xem gõ tên tỉnh quê mình để lên ghe, thả tim để chèo, tặng quà để ghe tăng tốc. Cấu trúc làm theo game "Ghe Rồng Ba Miền" chủ kênh gửi (16/11/2026) nhưng tên, hình vẽ, lời bình, âm thanh là của mình.
-
-## Luật chơi
-
-- Gõ tên tỉnh 1 lần là lên ghe tỉnh đó cả buổi (gõ tỉnh khác không đổi ghe). Nhận có dấu, không dấu, viết dính, tên tỉnh cũ đã sáp nhập (Bến Tre → Vĩnh Long, Bình Dương → TP.HCM...), chữ tắt đứng một mình (ct, hcm, sg, ag, cm, vl, dt, hn, hp). Danh sách: `src/game/tinh.ts`.
-- 1 tim = 1 mét. Ghe có người tự trôi 0,6 m/giây.
-- Quà: ghe của người tặng tăng tốc (tự lao thêm 8 m/giây), số giây theo số xu (`GAME.tangTocGiay`: 1 xu 2 giây ... 4999 xu 40 giây), cộng dồn tối đa 60 giây mỗi lần. Người chưa lên ghe tặng thì chỉ cảm ơn và nhắc gõ tên tỉnh.
-- Cấp ghe theo số người trên ghe: Ghe Ngo (1) → Ghe Rồng (5) → Ghe Rồng Hào Quang (15) → Rồng Vàng (30), mỗi cấp +5% tốc độ.
-- Sân nhà: mỗi chặng có 1 tỉnh sân nhà, nhanh hơn 10%.
-- Một vòng: giới thiệu chặng 4 giây → đua 150 giây (30 giây cuối là NƯỚC RÚT) → kết quả 9 giây → sắc phong 6 giây → chọn sông 10 giây.
-- Sự kiện ngẫu nhiên mỗi 9-14 giây (không mở trong nước rút): Cá chép vàng (1 ghe cần đủ tim trong 10 giây để VƯỢT VŨ MÔN lao lên vượt ghe phía trước, hụt thì "cá chép lặn mất"), Sức rồng (1 ghe +20% trong 20 giây), Khúc sông hẹp (bờ lấn vào, ghe đầu chậm 20% trong 12 giây), Mùa sen nở (ghe ngoài top 3 chèo ×2 trong 10 giây).
-- Tự động: VƯỢT! khi đổi ngôi đầu; ĐẠI CHIẾN khi 2 ghe đầu cách dưới 25 m; nước rút xướng tên người chèo nhiều nhất 4 giây qua ("tiếp sức nước rút").
-- Đường đua chính 6 làn (6 ghe đầu), ghe hạng 7-15 ở "đoàn ghe đang đuổi". Ghe không ai chèo/tặng/lên trong 5 phút thì cập bến (ẩn).
-- Kết quả: top 3, "Vua sông nước · thắng N vòng liền", Bảng vàng hôm nay (lưu data/bang-vang.json, sang ngày mới làm lại).
-- Sắc phong: người thả nhiều tim nhất vòng, danh hiệu theo nhịp chèo (mới / cứng 50 / thép 150 / huyền thoại 400).
-- Chọn sông: sân nhà 2 tỉnh đông người nhất + 1 sông lạ; gõ tên sông để bầu, mỗi người 1 phiếu; chặng vừa đua nghỉ 3 vòng.
-
-## File
-
-- `src/game/dua.ts`: lõi luật chơi (không React). Test: `npx tsx src/game/dua.check.ts`.
-- `src/game/config.ts`: mọi con số + lời bình luận (`GAME.loi`).
-- `src/game/tinh.ts`: 34 tỉnh, tên cũ, chữ tắt, câu giới thiệu quê. `src/game/chang.ts`: 10 chặng sông.
-- `src/game/GameStage.tsx`: màn hình 1080x1920. `public/assets/ghe/cap0-3.png`: ảnh ghe theo cấp (Gemini vẽ, đã tách nền). `src/game/ve/Ghe.tsx`: `GheAnh` (ảnh ghe + mái chèo SVG động) + vệt bọt sau đuôi. `src/game/ve/Song.tsx`: nền sông từng chặng (ảnh public/assets/song/) + dải bờ thật lấn vào khi Khúc sông hẹp (public/assets/bo/<id>-trai/-phai.jpg). `public/assets/hieu-ung/`: cá chép vàng, hoa sen, bó hoa, vương miện, cuộn sắc phong, tia nước, bảng gỗ (Gemini vẽ, đã tách nền). `public/assets/icon/`: nón lá, ghe nhỏ (cắt từ ảnh ghe).
-- `src/game/useGame.ts`: nối sự kiện TikTok với lõi, giọng bình luận. `src/game/sfx.ts`: trống ghe, chiêng, kèn (tự tạo, bỏ mp3 cùng tên vào public/assets/sfx/ là dùng file thay).
-- `src/game/GameControls.tsx`: nút Vòng mới, Tới nước rút, giả lập người gõ tỉnh / thả tim / tặng quà.
-- Cổng **3010** (BAT-LIVE.bat). Link LIVE Studio: http://lvh.me:3010/?view=stage. Xem thử không tiếng: `?view=stage&mute=1`.
-
-## Quyết định của chủ kênh
-
-- Tên game "Ghe Ngo 34 Tỉnh", không dùng tên "Ghe Rồng Ba Miền" (2026-11-16).
-- Làm giống cấu trúc game gốc, kể cả quà làm ghe tăng tốc (2026-11-16). Khác Ai Là Trạng Nguyên (ở đó quà không cho lợi thế).
-- Hình vẽ tạm bằng code, chủ kênh có thể thay ảnh tự vẽ sau (2026-11-16).
-- Nền sông 10 chặng dùng ảnh Gemini vẽ (2026-11-16): public/assets/song/<id chặng>.jpg, 1080x960, đã xoá dấu ngôi sao. Các tấm lật ngược xen kẽ để chỗ nối khớp. Lòng sông ảnh gốc hẹp (300-500 px) nên đã nới mặt nước ra 170-910 px, giữ 170 px bờ sát nước mỗi bên; 6 làn ghe đặt trong khoảng đó (`LAN_X` trong GameStage.tsx). Ảnh gốc chưa nới: chưa lưu trong repo. Giữ nguyên ảnh Vịnh Hạ Long dù có hàng dừa giữa biển (chủ kênh chọn).
-- Ghe dùng ảnh Gemini vẽ thay ghe SVG (2026-11-16, chủ kênh chê ghe cũ xấu): cấp 0 ghe gỗ sọc đỏ trắng đầu rắn, cấp 1 ghe rồng đỏ, cấp 2 ghe rồng tím bờm hồng (sáng hồng), cấp 3 Rồng Vàng (sáng vàng). Ghe lượn hình sóng theo dòng sông, mũi nghiêng theo hướng lượn (`.luon` trong index.css).
-- Hiệu ứng động của ghe (2026-11-16, chủ kênh muốn giống game gốc): đã gỡ mái chèo vẽ sẵn trong ảnh, vẽ lại 10 cặp mái chèo SVG quạt đồng loạt theo nhịp (nhanh hơn khi nước rút / tăng tốc), nước bắn trắng hồng ở đầu mái chèo, sóng trắng ở mũi, ánh kim lấp lánh (cấp càng cao càng nhiều), bọt dọc mạn khi lao nhanh. Component `GheAnh` trong ve/Ghe.tsx.
-- Kích thước ghe theo game gốc (2026-11-16, chủ kênh thấy ghe gốc sống động hơn): ghe dài 470-600 px theo cấp (`CAO_GHE`, ~¼-⅓ màn hình), mập (ngang = 0,39 × dài, ảnh nới ngang 1,35 lần), các ghe đi sát thành đoàn: ghe sau lùi tối đa ~260 px dù cách bao nhiêu mét (`TAM`). Mái chèo ghe cạnh nhau được phép chồng lên nhau như game gốc.
-- Ghe nhanh / ghe chậm như game gốc (2026-11-16): lõi đo tốc độ thật từng ghe (`toc`, m/giây làm mượt ~2,5 giây). Ghe chèo nhanh hơn trung bình nhô lên trước tối đa 50 px, ghe chậm tụt lại (`yMui`); nhịp mái chèo và nhịp lượn theo tốc độ riêng từng ghe (`nhipCua`, làm tròn 0,1 giây cho khỏi giật); ghe chồm lên mỗi nhịp chèo (`.lao`); vệt bọt dài theo tốc độ.
-- Thay hết hình vẽ bằng code / emoji trên màn hình live bằng ảnh thật (2026-11-16): cá chép vàng bơi cạnh ghe + nhảy lên khi vượt vũ môn (kèm tia nước nổ), sen thật rơi khi Mùa sen nở, bó hoa khi quà lớn, vương miện ở kết quả, cuộn sắc phong cổ, bảng gỗ chạm rồng làm khung kết quả / chọn sông, tia nước bắn ở đuôi và mũi khi tăng tốc, bờ thật lấn vào khi sông hẹp, icon nón lá / ghe nhỏ, nhãn "SÂN NHÀ". Còn vẽ bằng code: mái chèo (để quạt được), chữ, đồng hồ, bảng tên.
-- Giọng đọc chịu lỗi (2026-11-16, log live đầy "VieNeu lỗi" và Edge 429): VieNeu không trả lời thì nghỉ gọi 30 giây; Edge lỗi thì dùng Google 15 giây (429 = 60 giây); mỗi lần hỏng / chạy lại chỉ ghi 1 dòng log `[Giọng] ...`.
-- Chủ kênh KHÔNG cài VieNeu (2026-11-16): giọng mặc định là Edge NamMinh (`VIENEU_VOICE` trống). Edge gọi lần lượt từng câu, cách nhau ≥ 350 ms để đỡ bị chặn 429; bị chặn thì tạm dùng Google.
+- **`server.ts`**: Backend Express + SSE (`/api/tiktok/events`), kết nối TikTok LIVE tự động nối lại, nhúng trực tiếp worker Python `tools/vieneu-worker.py` (VieNeu-TTS v3 Turbo ONNX INT8 — tự động tìm tại `./VieNeu-TTS`, `../LIVE-TRANGNGUYEN/VieNeu-TTS`, `../LIVE-CLASS/VieNeu-TTS`), fallback sang Edge TTS (`NamMinh` / `HoaiMy`, đã vá chống crash `UnhandledPromiseRejection`) và Google TTS. Tự động lùi cổng nếu cổng `3010` đang bận.
+- **`src/game/dua.ts`**: Lõi máy trạng thái độc lập React (`chuyen` → `dua` → `ketQua` → `sacPhong` → `chonSong` + `nghiLive`). Kiểm thử tự động bằng `npx tsx src/game/dua.check.ts`.
+- **`src/game/tinh.ts`**: 34 tỉnh thành sau sắp xếp 2025 + tỉnh cũ trước sáp nhập + đảo tiền tiêu (Hoàng Sa, Trường Sa, Phú Quốc, Côn Đảo, Lý Sơn, Cát Bà...). Xét dấu tiếng Việt trước khi bỏ dấu để không bắt nhầm `"chị Huệ"` thành `"Huế"`.
+- **`src/game/chang.ts` & `src/game/ve/Song.tsx`**: 23 chặng sông khắp Bắc – Trung – Tây Nguyên – Nam Bộ sử dụng bộ ảnh mặt sông & bờ thật liền mạch kết hợp lọc màu vùng miền.
+- **`src/game/GameStage.tsx`**: Sân khấu dọc `1080 × 1920` chuẩn Safe-Zone TikTok (cụm *Đoàn đang đuổi* đặt gọn tại `x: 508..952` tránh vùng Comment góc dưới trái và nút TikTok mép phải; hỗ trợ `lite=true` giảm tải GPU cho khung Preview Dashboard).
+- **`src/live/bannedWords.ts` & `src/live/names.ts` & `src/live/voice.ts`**: Bộ lọc `isRudeName` chống tên tục lách ký tự (`l0n`, `đ.ị.t`, `djt123`) + khóa chặn tầng cuối trong `voice.say()`.
+- **Dữ liệu bền vững (`data/`)**:
+  - `settings.json`: tên kênh, tài khoản TikTok, giọng đọc đang chọn, thời lượng vòng, công tắc ẩn chữ quà `anQua`, 3 mức âm lượng.
+  - `data/bang-vang.json`: Bảng vàng tỉnh thắng trong ngày & trong tuần.
+  - `data/tay-cheo.json`: Tích lũy nhịp chèo & cấp bậc Thủy Thủ Trọn Đời của người xem.

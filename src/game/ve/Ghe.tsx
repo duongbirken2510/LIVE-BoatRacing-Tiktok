@@ -1,63 +1,94 @@
 /**
- * Ghe trên đường đua: ảnh Gemini vẽ (public/assets/ghe/cap0-3.png, đã tách nền và gỡ mái chèo)
- * + mái chèo SVG quạt theo nhịp, nước bắn, sóng mũi, lấp lánh. Và vệt bọt sau đuôi.
+ * Ghe đua thon gọn + vệt sóng chữ V trắng dài phía sau đuôi (phong cách Boat Racing hiện đại).
  */
-import { memo } from 'react';
+import { memo, useId } from 'react';
 
-/** Vệt nước sau đuôi ghe. `manh` 0-1: ghe càng nhanh vệt càng dài */
+/** Vệt nước rẽ sóng chữ V kéo dài sau đuôi ghe: ghe càng nhanh / hạng càng cao vệt càng dài */
 export function VetNuoc({ w, manh }: { w: number; manh: number }) {
-  // bọt nước trắng mờ toả sau đuôi ghe, ghe càng nhanh càng dài
-  const dai = w * (1.4 + manh * 2.2);
+  const uid = useId();
+  const mw = w * 2.5;
+  const dai = Math.round(145 + manh * 175);
   return (
-    <div
-      className="vet-bot"
-      style={{
-        width: w * 1.6,
-        height: dai,
-        opacity: 0.25 + manh * 0.35,
-        background: 'radial-gradient(ellipse 50% 100% at 50% 0%, rgba(255,255,255,0.9), rgba(255,255,255,0.35) 45%, rgba(255,255,255,0) 75%)',
-      }}
-    />
+    <svg
+      className="vet-bot pointer-events-none block"
+      width={mw}
+      height={dai}
+      viewBox="0 0 100 200"
+      preserveAspectRatio="none"
+      style={{ opacity: 0.42 + manh * 0.38 }}
+    >
+      <defs>
+        <linearGradient id={`${uid}-core`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.85" />
+          <stop offset="45%" stopColor="#e0f7ff" stopOpacity="0.38" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id={`${uid}-edge`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+          <stop offset="70%" stopColor="#ffffff" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points="38,0 62,0 98,200 2,200" fill={`url(#${uid}-core)`} />
+      <line x1="38" y1="0" x2="4" y2="195" stroke={`url(#${uid}-edge)`} strokeWidth="3.2" />
+      <line x1="62" y1="0" x2="96" y2="195" stroke={`url(#${uid}-edge)`} strokeWidth="3.2" />
+      <line x1="50" y1="4" x2="50" y2="165" stroke={`url(#${uid}-edge)`} strokeWidth="1.8" strokeDasharray="10 8" />
+    </svg>
   );
 }
 
-// ---------- Ghe ảnh (Gemini vẽ, đã gỡ mái chèo) + mái chèo động ----------
-// Ảnh public/assets/ghe/cap0-3.png cao 640, ngang 184-192; 10 hàng tay chèo cùng vị trí ở cả 4 kiểu ghe.
 const HANG_CHEO = [0.255, 0.305, 0.355, 0.406, 0.458, 0.545, 0.598, 0.649, 0.701, 0.759];
 const VB_W = 184;
 const VB_H = 640;
-const MEP = 38; // nửa bề ngang thân ghe (đơn vị ảnh)
-const DAI = 64; // chiều dài mái chèo
+const MEP = 38;
+const DAI = 58;
 
-// chỗ lấp lánh trên thân (tỉ lệ ngang, dọc), cấp càng cao càng nhiều
 const LAP_LANH = [
   [0.42, 0.2], [0.6, 0.33], [0.38, 0.47], [0.62, 0.58], [0.45, 0.7], [0.58, 0.82], [0.5, 0.08], [0.35, 0.62],
 ];
 
-export const GheAnh = memo(function GheAnh({ cap, w, h, nhip, nhanh }: { cap: number; w: number; h: number; nhip: number; nhanh: boolean }) {
+export const GheAnh = memo(function GheAnh({
+  cap,
+  w,
+  h,
+  nhip,
+  nhanh,
+  lite,
+}: {
+  cap: number;
+  w: number;
+  h: number;
+  nhip: number;
+  nhanh: boolean;
+  lite?: boolean;
+}) {
   const c = Math.min(3, Math.max(0, cap));
   const cx = VB_W / 2;
   const nhipS = `${nhip}s`;
-  const soSang = c === 0 ? 0 : c === 1 ? 3 : c === 2 ? 5 : 8;
+  const soSang = lite ? 0 : c === 0 ? 0 : c === 1 ? 2 : c === 2 ? 4 : 6;
   return (
     <div className="relative" style={{ width: w, height: h }}>
-      {/* sóng mũi ghe */}
-      <div className="song-mui" style={{ width: w * 1.3, height: h * 0.16, left: -w * 0.15, top: h * 0.02, animationDuration: nhipS }} />
+      {!lite && <div className="song-mui" style={{ width: w * 1.35, height: h * 0.16, left: -w * 0.175, top: h * 0.01, animationDuration: nhipS }} />}
+      {nhanh && !lite && (
+        <>
+          <div className="bot-man" style={{ left: -4, top: h * 0.2, height: h * 0.58, width: 10 }} />
+          <div className="bot-man" style={{ right: -4, top: h * 0.2, height: h * 0.58, width: 10 }} />
+        </>
+      )}
       <svg className="absolute inset-0 overflow-visible" width={w} height={h} viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none">
         {HANG_CHEO.map((t, i) => {
           const y = t * VB_H;
           return (
             <g key={i}>
-              {/* trái: gốc ở mép thân, đầu mái chèo hướng ra ngoài, hơi chếch về đuôi */}
               <g className="mc-t" style={{ transformOrigin: `${cx - MEP + 6}px ${y}px`, animationDuration: nhipS }}>
                 <line x1={cx - MEP + 6} y1={y} x2={cx - MEP - DAI} y2={y + 16} stroke="#6b4423" strokeWidth="4.5" strokeLinecap="round" />
-                <ellipse cx={cx - MEP - DAI} cy={y + 16} rx="10" ry="4.5" fill="#8a5a2b" stroke="#4a2e12" strokeWidth="1.5" transform={`rotate(13 ${cx - MEP - DAI} ${y + 16})`} />
-                <circle className="te-nuoc" cx={cx - MEP - DAI - 4} cy={y + 18} r="11" style={{ animationDuration: nhipS }} />
+                <ellipse cx={cx - MEP - DAI} cy={y + 16} rx="9.5" ry="4.2" fill="#8a5a2b" stroke="#4a2e12" strokeWidth="1.5" transform={`rotate(13 ${cx - MEP - DAI} ${y + 16})`} />
+                {!lite && <circle className="te-nuoc" cx={cx - MEP - DAI - 3} cy={y + 18} r="10" style={{ animationDuration: nhipS }} />}
               </g>
               <g className="mc-p" style={{ transformOrigin: `${cx + MEP - 6}px ${y}px`, animationDuration: nhipS }}>
                 <line x1={cx + MEP - 6} y1={y} x2={cx + MEP + DAI} y2={y + 16} stroke="#6b4423" strokeWidth="4.5" strokeLinecap="round" />
-                <ellipse cx={cx + MEP + DAI} cy={y + 16} rx="10" ry="4.5" fill="#8a5a2b" stroke="#4a2e12" strokeWidth="1.5" transform={`rotate(-13 ${cx + MEP + DAI} ${y + 16})`} />
-                <circle className="te-nuoc" cx={cx + MEP + DAI + 4} cy={y + 18} r="11" style={{ animationDuration: nhipS }} />
+                <ellipse cx={cx + MEP + DAI} cy={y + 16} rx="9.5" ry="4.2" fill="#8a5a2b" stroke="#4a2e12" strokeWidth="1.5" transform={`rotate(-13 ${cx + MEP + DAI} ${y + 16})`} />
+                {!lite && <circle className="te-nuoc" cx={cx + MEP + DAI + 3} cy={y + 18} r="10" style={{ animationDuration: nhipS }} />}
               </g>
             </g>
           );
@@ -66,12 +97,11 @@ export const GheAnh = memo(function GheAnh({ cap, w, h, nhip, nhanh }: { cap: nu
       <img
         src={`/assets/ghe/cap${c}.png`}
         alt=""
-        className={`relative block ${c === 2 ? 'sang-hong' : c === 3 ? 'sang-vang' : ''}`}
+        className={`relative block ${!lite && c === 2 ? 'sang-hong' : !lite && c === 3 ? 'sang-vang' : ''}`}
         style={{ width: w, height: h, maxWidth: 'none' }}
       />
-      {/* ánh kim lấp lánh */}
       {LAP_LANH.slice(0, soSang).map(([x, y], i) => (
-        <span key={i} className="lap-lanh-sao" style={{ left: x * w, top: y * h, animationDelay: `${(i * 0.37) % 1.6}s` }}>
+        <span key={i} className="lap-lanh-sao" style={{ left: x * w, top: y * h, fontSize: 16, animationDelay: `${(i * 0.37) % 1.6}s` }}>
           ✦
         </span>
       ))}

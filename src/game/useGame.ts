@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLiveEvents } from '../live/useLiveEvents';
-import type { LiveStatus } from '../live/types';
-import { voice, speakableName } from '../live/voice';
-import { containsBanned } from '../live/bannedWords';
+import type { CaiDat, LiveStatus, VieneuStatus } from '../live/types';
+import { voice, speakableName, safeDisplayName } from '../live/voice';
 import { NameBatcher } from '../live/scoreboard';
 import { GiftThanker, makePicker, OncePerPerson } from '../live/chatter';
 import { IS_STAGE, MUTE } from '../live/page';
@@ -15,23 +14,47 @@ const pick = makePicker();
 const post = (url: string, body: unknown) =>
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => undefined);
 
+const DEFAULT_CAI_DAT: CaiDat = {
+  tieuDe: '',
+  tieuDePhu: '',
+  duaSec: GAME.duaSec,
+  anQua: false,
+  choDoiGhe: true,
+  musicVol: 22,
+  sfxVol: 35,
+  mcVol: 100,
+};
+
 /**
- * Trang stage chạy game thật (DuaGhe) và gửi ảnh chụp lên server.
- * Trang điều khiển chỉ vẽ lại ảnh chụp đó, không tự chạy game.
+ * Trang stage chạy lõi DuaGhe, điều phối giọng đọc AI & gửi ảnh chụp trạng thái lên server.
+ * Trang điều khiển nhận trạng thái xem trước im lặng và điều khiển trực tiếp.
  */
 export function useGame() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
+  const [vieneu, setVieneu] = useState<VieneuStatus | null>(null);
+  const [stageCount, setStageCount] = useState(0);
+  const stageCountRef = useRef(0);
+  stageCountRef.current = stageCount;
   const [view, setView] = useState<View | null>(null);
   const [channelName, setChannelName] = useState(GAME.defaultChannelName);
-  const [caiDatGoc, setCaiDat] = useState({ tieuDe: '' });
-  const caiDat = { tieuDe: caiDatGoc.tieuDe || GAME.tieuDeMacDinh };
+  const channelRef = useRef(GAME.defaultChannelName);
+  channelRef.current = channelName;
+
+  const [caiDatGoc, setCaiDatGoc] = useState<CaiDat>(DEFAULT_CAI_DAT);
+  const caiDat: CaiDat = {
+    ...caiDatGoc,
+    tieuDe: caiDatGoc.tieuDe || GAME.tieuDeMacDinh,
+    tieuDePhu: caiDatGoc.tieuDePhu || GAME.tieuDePhu,
+  };
+
   const [room] = useState(() => new DuaGhe());
-  if (import.meta.env.DEV) Object.assign(window as any, { __room: room, __sfx: sfx }); // để thử trong trình duyệt
+  if (import.meta.env.DEV) Object.assign(window as any, { __room: room, __sfx: sfx });
+
   const [talk] = useState(() => ({
     greeter: new NameBatcher(
       GAME.greetEveryMs,
       GAME.namesPerGreeting,
-      (names) => voice.say(GAME.greeting(joinNames(names))),
+      (names) => voice.say(GAME.greeting(joinNames(names), channelRef.current)),
       () => voice.waiting >= 1,
     ),
     gifts: new GiftThanker(GAME.giftThanksCooldownMs, GAME.bigGiftCoins),
@@ -40,9 +63,16 @@ export function useGame() {
     binhLuc: 0,
   }));
 
-  const safeName = (nickname: string, username: string) => (containsBanned(nickname) ? username : nickname);
+  const applyCaiDat = (c: CaiDat) => {
+    setCaiDatGoc(c);
+    room.setDuaSec(c.duaSec);
+    room.choDoiGhe = c.choDoiGhe;
+    if (IS_STAGE && !MUTE) {
+      sfx.setVolumes(c.musicVol, c.sfxVol);
+      voice.setVolume(c.mcVol / 100);
+    }
+  };
 
-  // Lời bình theo sự kiện của game. Câu quan trọng đi làn ưu tiên để lời chào không chen trước.
   const speak = (ev: Ev) => {
     const L = GAME.loi;
     const now = Date.now();
@@ -52,14 +82,18 @@ export function useGame() {
         if (room.ghe.has(room.chang.nha)) voice.say(pick(L.sanNha)?.(ev.nha) ?? '', true);
         return;
       }
-      case 'len':
+      case 'len': {
+        if (ev.daoBienDong) {
+          return voice.say(pick(L.bienDong)?.(ev.daoBienDong, ev.tinh) ?? '', true);
+        }
         if (ev.tinhMoi) return voice.say(pick(L.tinhMoi)?.(ev.tinh) ?? '');
-        // phòng đông: không đọc từng người, 1 câu mỗi 6 giây
         if (now - talk.lenLuc > 6000 && voice.waiting < 2) {
           talk.lenLuc = now;
-          voice.say(pick(L.len)?.(speakableName(ev.name), ev.tinh) ?? '');
+          const ten = speakableName(ev.name);
+          voice.say(ev.doiGhe ? (pick(L.doiGhe)?.(ten, ev.tinh) ?? '') : (pick(L.len)?.(ten, ev.tinh) ?? ''));
         }
         return;
+      }
       case 'lenCap':
         return voice.say(pick(L.lenCap)?.(ev.tinh, ev.cap) ?? '', true);
       case 'caChep':
@@ -83,7 +117,7 @@ export function useGame() {
       case 'tiepSuc':
         return voice.say(pick(L.tiepSuc)?.(speakableName(ev.name), ev.tinh) ?? '');
       case 'ketQua': {
-        voice.stop(); // bỏ lời bình cũ còn tồn, đọc kết quả ngay
+        voice.stop();
         const nhat = ev.top[0];
         if (!nhat) return voice.say(L.khongAi, true);
         voice.say(pick(L.ketQua)?.(nhat.tinh, String(nhat.m)) ?? '', true);
@@ -91,11 +125,19 @@ export function useGame() {
         return;
       }
       case 'thang':
-        // ghi bảng vàng hôm nay (chỉ trang chính, tránh cộng 2 lần)
-        if (voice.speaker)
+        if (voice.speaker) {
           void post('/api/bang-vang', { tinh: ev.tinh })
             .then((r) => r?.json())
-            .then((b) => b?.thang && (room.bang = b.thang));
+            .then((b) => {
+              if (b?.thang) room.bang = b.thang;
+              if (b?.thangTuan) room.bangTuan = b.thangTuan;
+            });
+        }
+        return;
+      case 'luuTayCheo':
+        if (voice.speaker) {
+          void post('/api/tay-cheo', { list: ev.list, mvpId: ev.mvpId });
+        }
         return;
       case 'sacPhong':
         return voice.say(L.sacPhong(speakableName(ev.name), ev.tinh, ev.nhip, ev.danhHieu), true);
@@ -106,12 +148,16 @@ export function useGame() {
       case 'qua': {
         if (!talk.gifts.shouldThank(ev.name, ev.coins, voice.waitingPriority)) return;
         const ten = speakableName(ev.name);
-        return voice.say(ev.tinh ? pick(L.camQua)!(ten, ev.tinh, String(ev.giay)) : L.camQuaChuaGhe(ten), true);
+        return voice.say(ev.tinh ? pick(L.camQua)!(ten, ev.tinh, String(ev.giay)) : L.camQuaChuaGhe(ten, String(ev.giay || 2)), true);
       }
+      case 'congBu':
+        return voice.say(L.congBu(speakableName(ev.name), ev.tinh, String(ev.giay)), true);
+      case 'nghiLive':
+        voice.stop();
+        return voice.say(L.nghiLive(channelRef.current, ev.topTinh), true);
     }
   };
 
-  // Bình luận chen vào lúc giọng rảnh giữa vòng đua
   const binh = (now: number) => {
     if (room.phase !== 'dua' || voice.busy || voice.quietForMs(now) < 6000 || now - talk.binhLuc < 12_000) return;
     talk.binhLuc = now;
@@ -129,66 +175,104 @@ export function useGame() {
 
   useLiveEvents({
     onStatus: setStatus,
+    onVieneu: setVieneu,
+    onStages: setStageCount,
     onGameState: (s) => !IS_STAGE && setView(s),
-    onCaiDat: setCaiDat,
+    onCaiDat: applyCaiDat,
 
     onChat: (e) => {
-      if (!IS_STAGE) return;
-      room.chat({ id: e.username, name: safeName(e.nickname, e.username), avatar: e.avatar, comment: e.comment }, Date.now());
+      if (!IS_STAGE && stageCountRef.current > 0) return;
+      room.chat({ id: e.username, name: safeDisplayName(e.nickname, e.username), avatar: e.avatar, comment: e.comment }, Date.now());
     },
 
     onGift: (e) => {
-      if (!IS_STAGE) return;
-      const name = safeName(e.nickname, e.username);
+      if (!IS_STAGE && stageCountRef.current > 0) return;
+      const name = safeDisplayName(e.nickname, e.username);
       room.qua({ id: e.username, name, gift: e.giftName, count: e.repeatCount, coins: e.diamondCount * e.repeatCount }, Date.now());
     },
 
     onMember: (e) => {
-      if (!IS_STAGE) return;
-      const spoken = speakableName(safeName(e.nickname, e.username));
+      if (!IS_STAGE || room.phase === 'nghiLive') return;
+      const spoken = speakableName(safeDisplayName(e.nickname, e.username));
       if (spoken !== 'bạn') talk.greeter.add(e.username, spoken);
     },
 
-    // Tim = chèo
     onLike: (e) => {
-      if (IS_STAGE) room.tim(e.username, e.likeCount, Date.now());
+      if (IS_STAGE || stageCountRef.current === 0) room.tim(e.username, e.likeCount, Date.now());
     },
 
     onFollow: (e) => {
-      if (!IS_STAGE) return;
-      if (talk.follows.first(e.username)) voice.say(GAME.thankFollow(speakableName(safeName(e.nickname, e.username))));
+      if (!IS_STAGE || room.phase === 'nghiLive') return;
+      if (talk.follows.first(e.username)) {
+        voice.say(GAME.thankFollow(speakableName(safeDisplayName(e.nickname, e.username)), channelRef.current));
+      }
     },
 
     onControl: (c) => {
       if (c.action === 'setName' && c.text) setChannelName(c.text);
-      if (!IS_STAGE) return;
+      if (c.action === 'setVoice') voice.clearPrefetch();
+      if (!IS_STAGE && stageCountRef.current > 0) return;
       const now = Date.now();
-      if (c.action === 'speak' && c.text) voice.say(c.text, true);
-      if (c.action === 'setRate' && c.text) voice.rate = Number(c.text) || 1;
+      if (IS_STAGE && c.action === 'speak' && c.text) voice.say(c.text, true);
+      if (IS_STAGE && c.action === 'setRate' && c.text) {
+        voice.rate = Number(c.text) || 1;
+        voice.clearPrefetch();
+      }
       if (c.action === 'reset') {
-        voice.stop();
+        if (IS_STAGE) voice.stop();
         room.xoaHet(now);
       }
-      if (c.action === 'custom' && c.text === 'vongmoi') {
-        voice.stop();
-        room.vongMoi(now);
+      if (c.action === 'custom' && c.text) {
+        if (c.text === 'vongmoi') {
+          if (IS_STAGE) voice.stop();
+          room.vongMoi(now);
+        } else if (c.text === 'nuocrut') {
+          room.toiNuocRut(now);
+        } else if (c.text === 'tatlive') {
+          room.tatLive(now);
+        } else if (c.text.startsWith('chang:')) {
+          if (IS_STAGE) voice.stop();
+          room.chonChangNgay(c.text.slice(6), now);
+        } else if (c.text.startsWith('sukien:')) {
+          const sk = c.text.slice(7) as 'caChep' | 'sucRong' | 'songHep' | 'senNo';
+          room.kichHoatSuKien(sk, now);
+        }
       }
-      if (c.action === 'custom' && c.text === 'nuocrut') room.toiNuocRut(now);
     },
   });
 
-  // Vòng chạy game trên trang stage
+  // Khi chưa mở link Stage trong OBS (stageCount === 0), trang Dashboard tự chạy bản xem thử để không bao giờ bị kẹt "Đang mở trường đua..."
+  useEffect(() => {
+    if (IS_STAGE || stageCount > 0) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      room.tick(now);
+      room.lay();
+      setView(room.view(now));
+    }, 250);
+    return () => clearInterval(id);
+  }, [stageCount, room]);
+
   useEffect(() => {
     if (!IS_STAGE) return;
     let lastPost = 0;
     let prev: View | null = null;
     fetch('/api/bang-vang')
       .then((r) => r.json())
-      .then((b) => b?.thang && (room.bang = b.thang))
+      .then((b) => {
+        if (b?.thang) room.bang = b.thang;
+        if (b?.thangTuan) room.bangTuan = b.thangTuan;
+      })
       .catch(() => {});
+    fetch('/api/tay-cheo')
+      .then((r) => r.json())
+      .then((m) => m && typeof m === 'object' && (room.hoSo = m))
+      .catch(() => {});
+
     [...GAME.loi.songHep, ...GAME.loi.senNo].forEach((t) => voice.prefetch(t));
-    if (MUTE) sfx.volume = sfx.musicVolume = 0;
+    if (MUTE) sfx.setVolumes(0, 0);
     sfx.loadFiles();
+
     const id = setInterval(() => {
       const now = Date.now();
       room.tick(now);
@@ -204,22 +288,24 @@ export function useGame() {
         void post('/api/game/state', v);
       }
     }, 250);
+
     const share = setInterval(() => {
+      if (room.phase === 'nghiLive') return;
       const line = pick(GAME.shareLines);
       if (line) voice.say(line);
     }, GAME.shareReminderEveryMs);
+
     return () => {
       clearInterval(id);
       clearInterval(share);
     };
   }, []);
 
-  return { status, channelName, view, caiDat };
+  return { status, vieneu, stageCount, channelName, view, caiDat };
 }
 
 export type GameState = ReturnType<typeof useGame>;
 
-// ['An', 'Bình', 'Chi'] -> 'An, Bình và Chi'
 function joinNames(names: string[]) {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} và ${names[names.length - 1]}` : names[0] ?? '';
 }

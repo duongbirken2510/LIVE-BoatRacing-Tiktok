@@ -1,17 +1,19 @@
 /**
- * Server chung cho mọi game live TikTok. Game riêng KHÔNG cần sửa file này,
- * trừ khi cần thêm API mới (thêm vào cuối, chỗ "API riêng của game").
+ * Server trung tâm của Ghe Ngo 34 Tỉnh (LIVE-DUAGHE — Phiên bản nâng cấp Duong Birken).
  *
- * - Kết nối phòng live TikTok (tiktok-live-connector 2.x, proto v3)
- * - Đẩy sự kiện xuống trình duyệt qua SSE: /api/tiktok/events
- * - Lệnh từ trang điều khiển -> trang stage: /api/control
- * - Giọng đọc tiếng Việt: /api/tts (Edge TTS, lỗi thì Google)
- * - Giả lập sự kiện để test không cần live: /api/test/emit
+ * - Kết nối phòng live TikTok (tiktok-live-connector 2.x, proto v3) + tự kết nối lại cả ngày
+ * - Nhúng trực tiếp AI Voice VieNeu-TTS v3 Turbo (ONNX INT8, 25 giọng Việt + "Adam bựa") qua stdio pipe
+ * - Dự phòng 3 tầng: VieNeu-TTS -> Microsoft Edge TTS (NamMinh / HoaiMy, chống crash timeout) -> Google TTS
+ * - Bảng vàng Tỉnh Hôm Nay + Bảng vàng Tỉnh Tuần (data/bang-vang.json) & Cấp bậc Thủy Thủ Trọn Đời (data/tay-cheo.json)
+ * - Tự lùi cổng nếu cổng 3010 đang bận + fallback Vite an toàn trên mọi máy Windows
  */
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import { spawn, type ChildProcessByStdio } from 'child_process';
+import type { Readable, Writable } from 'stream';
 import { fileURLToPath } from 'url';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent } from 'tiktok-live-connector';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
@@ -20,13 +22,14 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3010;
+const BASE_PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3010;
+let actualPort = BASE_PORT;
 
-// Giọng đọc. Đổi ở đây nếu game cần giọng khác (vi-VN-HoaiMyNeural = nữ)
-const TTS_VOICE = process.env.TTS_VOICE || 'vi-VN-NamMinhNeural';
+const TTS_VOICE_M = process.env.TTS_VOICE || 'vi-VN-NamMinhNeural';
+const TTS_VOICE_F = process.env.TTS_VOICE_F || 'vi-VN-HoaiMyNeural';
 const TTS_PITCH = process.env.TTS_PITCH || '-4%';
 
-// Chặn DNS rebinding: trang web lạ trỏ tên miền của nó về 127.0.0.1 thì Host/Origin sẽ khác các tên dưới đây
+// Chặn DNS rebinding: chỉ nhận truy cập từ máy cục bộ
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', 'lvh.me']);
 const hostOk = (h?: string) => !!h && LOCAL_HOSTS.has(h.replace(/:\d+$/, '').toLowerCase());
 app.use((req, res, next) => {
@@ -35,8 +38,75 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
+
+// ---------- Cài đặt bền vững ----------
+export interface CaiDatServer {
+  tieuDe: string;
+  tieuDePhu: string;
+  duaSec: number;
+  anQua: boolean;
+  choDoiGhe: boolean;
+  musicVol: number;
+  sfxVol: number;
+  mcVol: number;
+}
+
+interface SettingsFile {
+  channelName?: string;
+  tiktokUser?: string;
+  vieneuVoice?: string;
+  tieuDe?: string;
+  tieuDePhu?: string;
+  duaSec?: number;
+  anQua?: boolean;
+  choDoiGhe?: boolean;
+  musicVol?: number;
+  sfxVol?: number;
+  mcVol?: number;
+}
+
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+let wantUser = '';
+let lastRateControl: { action: string; text: string } | null = null;
+let lastNameControl: { action: string; text: string } | null = null;
+let settings: SettingsFile = {};
+
+try {
+  settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  if (typeof settings.channelName === 'string' && settings.channelName.trim()) {
+    lastNameControl = { action: 'setName', text: settings.channelName.trim() };
+  }
+  if (typeof settings.tiktokUser === 'string') wantUser = settings.tiktokUser;
+} catch {
+  // chưa có settings.json
+}
+
+const saveSettings = (patch: Partial<SettingsFile>) => {
+  settings = { ...settings, ...patch };
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  } catch (err) {
+    console.error('Không lưu được settings.json:', err);
+  }
+};
+
+const clampNum = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+};
+
+const caiDat = (): CaiDatServer => ({
+  tieuDe: settings.tieuDe ?? '',
+  tieuDePhu: settings.tieuDePhu ?? '',
+  duaSec: clampNum(settings.duaSec, 60, 360, 150),
+  anQua: Boolean(settings.anQua ?? false),
+  choDoiGhe: settings.choDoiGhe !== undefined ? Boolean(settings.choDoiGhe) : true,
+  musicVol: clampNum(settings.musicVol, 0, 100, 22),
+  sfxVol: clampNum(settings.sfxVol, 0, 100, 35),
+  mcVol: clampNum(settings.mcVol, 0, 100, 100),
+});
 
 // ---------- SSE ----------
 interface LiveStats {
@@ -46,6 +116,7 @@ interface LiveStats {
   roomId: string;
   viewerCount: number;
   totalLikes: number;
+  port: number;
   error?: string;
 }
 
@@ -56,41 +127,15 @@ const emptyStats = (): LiveStats => ({
   roomId: '',
   viewerCount: 0,
   totalLikes: 0,
+  port: actualPort,
   error: '',
 });
 
 let liveStats = emptyStats();
 let sseClients: express.Response[] = [];
-// Các trang stage đang mở (theo thứ tự mở). Chỉ trang mở SAU CÙNG được phát tiếng, tránh 2 giọng đọc đè nhau
-// khi lỡ có 2 nguồn Link trong LIVE Studio hoặc mở thêm ?view=stage ở trình duyệt khác.
 let stageIds: string[] = [];
 const announceSpeaker = () => broadcast('speaker', { id: stageIds[stageIds.length - 1] ?? null, count: stageIds.length });
 let activeConn: InstanceType<typeof TikTokLiveConnection> | null = null;
-let lastRateControl: { action: string; text: string } | null = null;
-
-// Tên kênh (giọng đọc + tiêu đề) lưu ở settings.json cạnh file này, tắt server mở lại vẫn còn
-const SETTINGS_FILE = path.join(__dirname, 'settings.json');
-let lastNameControl: { action: string; text: string } | null = null;
-// tài khoản TikTok đang cần giữ kết nối: rớt thì tự kết nối lại, tắt server bật lại cũng tự kết nối
-let wantUser = '';
-let settings: { channelName?: string; tiktokUser?: string; tieuDe?: string } = {};
-try {
-  settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-  if (typeof settings.channelName === 'string' && settings.channelName.trim()) {
-    lastNameControl = { action: 'setName', text: settings.channelName.trim() };
-  }
-  if (typeof settings.tiktokUser === 'string') wantUser = settings.tiktokUser;
-} catch {
-  // chưa lưu tên nào: dùng tên mặc định trong config.ts
-}
-const saveSettings = (patch: typeof settings) => {
-  settings = { ...settings, ...patch };
-  try {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-  } catch (err) {
-    console.error('Không lưu được settings.json:', err);
-  }
-};
 
 function broadcast(eventType: string, data: unknown) {
   const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -108,16 +153,21 @@ app.get('/api/tiktok/events', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
+  liveStats.port = actualPort;
   res.write(`event: status\ndata: ${JSON.stringify(liveStats)}\n\n`);
   res.write(`event: caiDat\ndata: ${JSON.stringify(caiDat())}\n\n`);
+  res.write(`event: vieneu\ndata: ${JSON.stringify(getVieneuStatus())}\n\n`);
   if (lastRateControl) res.write(`event: control\ndata: ${JSON.stringify(lastRateControl)}\n\n`);
   if (lastNameControl) res.write(`event: control\ndata: ${JSON.stringify(lastNameControl)}\n\n`);
   sseClients.push(res);
+
   const stageId = typeof req.query.stage === 'string' ? req.query.stage.slice(0, 40) : '';
   if (stageId) {
     stageIds = [...stageIds.filter((x) => x !== stageId), stageId];
     announceSpeaker();
-  } else res.write(`event: speaker\ndata: ${JSON.stringify({ id: stageIds[stageIds.length - 1] ?? null, count: stageIds.length })}\n\n`);
+  } else {
+    res.write(`event: speaker\ndata: ${JSON.stringify({ id: stageIds[stageIds.length - 1] ?? null, count: stageIds.length })}\n\n`);
+  }
 
   const heartbeat = setInterval(() => {
     try {
@@ -137,15 +187,17 @@ app.get('/api/tiktok/events', (req, res) => {
   });
 });
 
-app.get('/api/tiktok/status', (_req, res) => res.json({ success: true, data: liveStats }));
+app.get('/api/tiktok/status', (_req, res) => {
+  liveStats.port = actualPort;
+  res.json({ success: true, data: liveStats });
+});
 
 // ---------- Đọc dữ liệu TikTok (proto v3) ----------
 const userOf = (data: any) => data?.user?.displayId || data?.user?.uniqueId || data?.uniqueId || 'nguoi-xem';
 const nickOf = (data: any) => data?.user?.nickname || data?.nickname || data?.uniqueId || 'Bạn';
 const avatarOf = (data: any) => data?.user?.avatarThumb?.urlList?.[0] || '';
 
-// ---------- Tự kết nối lại (treo live cả ngày) ----------
-// Rớt kết nối / hết phiên live / chưa live: thử lại sau 15 giây, rồi 30, 60, tối đa 2 phút một lần, cho tới khi được.
+// ---------- Tự kết nối lại ----------
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTries = 0;
 function scheduleReconnect(why: string) {
@@ -153,7 +205,7 @@ function scheduleReconnect(why: string) {
   const delay = Math.min(120_000, 15_000 * 2 ** reconnectTries);
   reconnectTries++;
   console.log(`[TikTok] ${why}. Tự kết nối lại @${wantUser} sau ${delay / 1000} giây`);
-  liveStats = { ...liveStats, isConnected: false, isConnecting: false, error: `${why}. Tự kết nối lại sau ${delay / 1000} giây` };
+  liveStats = { ...liveStats, isConnected: false, isConnecting: false, port: actualPort, error: `${why}. Tự kết nối lại sau ${delay / 1000} giây` };
   broadcast('status', liveStats);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -200,46 +252,44 @@ async function connectTikTok(cleanUser: string) {
 
   const conn = new TikTokLiveConnection(cleanUser, {
     processInitialData: true,
-    // Lấy danh sách quà cần gói trả phí Euler Stream; sự kiện quà đã có tên và kim cương
     enableExtendedGiftInfo: false,
   });
 
   conn.on(ControlEvent.CONNECTED, (state: { roomId?: string }) => {
     console.log(`[TikTok] Đã kết nối @${cleanUser}, room ${state?.roomId}`);
-    liveStats = { ...liveStats, isConnected: true, isConnecting: false, roomId: state?.roomId || '', error: '' };
+    liveStats = { ...liveStats, isConnected: true, isConnecting: false, roomId: state?.roomId || '', port: actualPort, error: '' };
     broadcast('status', liveStats);
     reconnectTries = 0;
   });
 
-  // kết nối cũ bị thay bằng kết nối mới thì không tự nối lại (activeConn đã khác)
   conn.on(ControlEvent.DISCONNECTED, () => {
     console.log(`[TikTok] Mất kết nối @${cleanUser}`);
     if (activeConn !== conn) return;
-    liveStats = { ...liveStats, isConnected: false, isConnecting: false };
+    liveStats = { ...liveStats, isConnected: false, isConnecting: false, port: actualPort };
     broadcast('status', liveStats);
     scheduleReconnect('Mất kết nối TikTok');
   });
 
   conn.on(WebcastEvent.STREAM_END, () => {
     if (activeConn !== conn) return;
-    liveStats = { ...liveStats, isConnected: false, isConnecting: false, error: 'Phiên live đã kết thúc' };
+    liveStats = { ...liveStats, isConnected: false, isConnecting: false, port: actualPort, error: 'Phiên live đã kết thúc' };
     broadcast('status', liveStats);
     scheduleReconnect('Phiên live đã kết thúc');
   });
 
   conn.on(WebcastEvent.CHAT, (data: any) => {
+    const rawCreate = Number(data?.common?.createTime) || 0;
+    const createTime = rawCreate > 0 && rawCreate < 1e11 ? rawCreate * 1000 : (rawCreate || Date.now());
     broadcast('chat', {
       username: userOf(data),
       nickname: nickOf(data),
-      comment: data?.content || data?.comment || '', // proto v3: chữ nằm ở `content`
+      comment: data?.content || data?.comment || '',
       avatar: avatarOf(data),
       timestamp: Date.now(),
-      // giờ TikTok gắn lúc người xem gửi (ms): xếp ai trả lời nhanh nhất theo giờ này, không theo lúc bot nhận
-      createTime: Number(data?.common?.createTime) || Date.now(),
+      createTime,
     });
   });
 
-  // TikTok gửi lại quà combo với repeatCount cộng dồn; chỉ chuyển phần mới
   const streakCounts = new Map<string, number>();
   conn.on(WebcastEvent.GIFT, (data: any) => {
     const username = userOf(data);
@@ -302,17 +352,19 @@ async function connectTikTok(cleanUser: string) {
 
   activeConn = conn;
 
+  let connectTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // Chưa LIVE thì thư viện có thể treo mãi ở "Đang kết nối": hỏi TikTok trước, báo lỗi ngay
-    const live = await conn.fetchIsLive().catch(() => true); // hỏi lỗi thì cứ thử kết nối
+    const live = await conn.fetchIsLive().catch(() => true);
     if (!live) throw new Error('TikTok báo tài khoản này CHƯA LIVE. Bấm Phát trực tiếp trong LIVE Studio trước rồi mới kết nối');
     return await Promise.race([
       conn.connect(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('quá 30 giây không vào được phòng live')), 30_000)),
+      new Promise<never>((_, reject) => {
+        connectTimer = setTimeout(() => reject(new Error('quá 30 giây không vào được phòng live')), 30_000);
+      }),
     ]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    liveStats = { ...liveStats, isConnected: false, isConnecting: false, error: msg };
+    liveStats = { ...liveStats, isConnected: false, isConnecting: false, port: actualPort, error: msg };
     broadcast('status', liveStats);
     if (activeConn === conn) {
       try {
@@ -323,11 +375,12 @@ async function connectTikTok(cleanUser: string) {
       activeConn = null;
     }
     throw err;
+  } finally {
+    clearTimeout(connectTimer);
   }
 }
 
 app.post('/api/tiktok/disconnect', (_req, res) => {
-  // chủ kênh tự ngắt: thôi tự kết nối lại, bật server lại cũng không tự kết nối
   stopReconnect();
   wantUser = '';
   saveSettings({ tiktokUser: '' });
@@ -342,8 +395,23 @@ app.post('/api/tiktok/disconnect', (_req, res) => {
   res.json({ success: true });
 });
 
-// ---------- Lệnh từ trang điều khiển (chỉ trang stage làm theo) ----------
-const CONTROL_ACTIONS = ['speak', 'setRate', 'reset', 'setName', 'custom'];
+app.post('/api/shutdown', (_req, res) => {
+  stopReconnect();
+  wantUser = '';
+  try {
+    activeConn?.disconnect();
+  } catch {
+    // bỏ qua
+  }
+  res.json({ success: true });
+  setTimeout(() => {
+    cleanupWorker();
+    process.exit(0);
+  }, 400);
+});
+
+// ---------- Lệnh điều khiển ----------
+const CONTROL_ACTIONS = ['speak', 'setRate', 'reset', 'setName', 'setVoice', 'custom'];
 app.post('/api/control', (req, res) => {
   const { action, text } = req.body || {};
   if (!CONTROL_ACTIONS.includes(action)) return res.status(400).json({ success: false, error: 'Lệnh không hợp lệ' });
@@ -353,22 +421,17 @@ app.post('/api/control', (req, res) => {
   const payload = { action, text: typeof text === 'string' ? text.trim().slice(0, 1000) : undefined };
   if (action === 'setRate' && payload.text) lastRateControl = { action, text: payload.text };
   if (action === 'setName') {
-    // Chỉ chữ thường, tối đa 40 ký tự
     const name = (payload.text || '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 40);
     if (!name) return res.status(400).json({ success: false, error: 'Chưa nhập tên kênh' });
     payload.text = name;
     lastNameControl = { action, text: name };
-    try {
-      saveSettings({ channelName: name });
-    } catch (err) {
-      console.error('Không lưu được settings.json:', err);
-    }
+    saveSettings({ channelName: name });
   }
   broadcast('control', payload);
   res.json({ success: true, pages: sseClients.length });
 });
 
-// ---------- Giả lập sự kiện (test không cần live) ----------
+// ---------- Giả lập sự kiện ----------
 const TEST_EVENTS = ['chat', 'gift', 'member', 'follow', 'share', 'like'];
 app.post('/api/test/emit', (req, res) => {
   const { type, data } = req.body || {};
@@ -382,54 +445,136 @@ app.post('/api/test/emit', (req, res) => {
   res.json({ success: true });
 });
 
-// ---------- Ghe Ngo 34 Tỉnh ----------
-// Cài đặt hiển thị ở trang điều khiển: tên game trên đầu màn hình. Trống = dùng mặc định trong config.ts
-const caiDat = () => ({ tieuDe: settings.tieuDe ?? '' });
+// ---------- Cài đặt Game & Âm thanh ----------
 app.get('/api/cai-dat', (_req, res) => res.json(caiDat()));
 app.post('/api/cai-dat', (req, res) => {
-  const sach = (x: unknown) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, 24) : undefined);
-  const tieuDe = sach(req.body?.tieuDe);
-  if (tieuDe !== undefined) saveSettings({ tieuDe });
-  broadcast('caiDat', caiDat());
-  res.json({ success: true, ...caiDat() });
+  const b = req.body || {};
+  const sach = (x: unknown, max = 24) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : undefined);
+  const patch: Partial<SettingsFile> = {};
+  const tieuDe = sach(b.tieuDe, 24);
+  const tieuDePhu = sach(b.tieuDePhu, 18);
+  if (tieuDe !== undefined) patch.tieuDe = tieuDe;
+  if (tieuDePhu !== undefined) patch.tieuDePhu = tieuDePhu;
+  if (b.duaSec !== undefined) patch.duaSec = clampNum(b.duaSec, 60, 360, 150);
+  if (b.anQua !== undefined) patch.anQua = Boolean(b.anQua);
+  if (b.choDoiGhe !== undefined) patch.choDoiGhe = Boolean(b.choDoiGhe);
+  if (b.musicVol !== undefined) patch.musicVol = clampNum(b.musicVol, 0, 100, 22);
+  if (b.sfxVol !== undefined) patch.sfxVol = clampNum(b.sfxVol, 0, 100, 35);
+  if (b.mcVol !== undefined) patch.mcVol = clampNum(b.mcVol, 0, 100, 100);
+  saveSettings(patch);
+  const next = caiDat();
+  broadcast('caiDat', next);
+  res.json({ success: true, ...next });
 });
 
-// Trang stage chạy game, gửi ảnh chụp lên đây; trang điều khiển vẽ lại ảnh chụp đó (xem trước luôn khớp live)
 app.post('/api/game/state', (req, res) => {
   broadcast('gamestate', req.body || {});
   res.json({ success: true });
 });
 
-// Bảng vàng hôm nay: tỉnh nào thắng bao nhiêu vòng trong ngày (giờ máy), sang ngày mới làm lại.
-// Tắt bật server giữa buổi live vẫn nhớ.
+// ---------- Bảng Vàng Tỉnh Hôm Nay + Tuần Này ----------
 const BANG_FILE = path.join(__dirname, 'data', 'bang-vang.json');
-type BangVang = { ngay: string; thang: Record<string, number> };
-const homNay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+type BangVang = {
+  ngay: string;
+  thang: Record<string, number>;
+  tuan: string;
+  thangTuan: Record<string, number>;
+};
+
+const fmtYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const homNay = (d = new Date()) => fmtYmd(d);
+const dauTuan = (d = new Date()) => {
+  const c = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = c.getDay() || 7; // Thứ Hai = 1 ... Chủ Nhật = 7
+  c.setDate(c.getDate() - (day - 1));
+  return fmtYmd(c);
+};
+
 function docBang(): BangVang {
+  const nay = homNay();
+  const tn = dauTuan();
   try {
-    const b = JSON.parse(fs.readFileSync(BANG_FILE, 'utf8')) as BangVang;
-    if (b.ngay === homNay() && b.thang) return b;
+    const raw = JSON.parse(fs.readFileSync(BANG_FILE, 'utf8')) as Partial<BangVang>;
+    return {
+      ngay: nay,
+      thang: raw.ngay === nay && raw.thang ? raw.thang : {},
+      tuan: tn,
+      thangTuan: raw.tuan === tn && raw.thangTuan ? raw.thangTuan : {},
+    };
   } catch {
-    // chưa có file
+    return { ngay: nay, thang: {}, tuan: tn, thangTuan: {} };
   }
-  return { ngay: homNay(), thang: {} };
 }
+
 app.get('/api/bang-vang', (_req, res) => res.json(docBang()));
 app.post('/api/bang-vang', (req, res) => {
   const tinh = typeof req.body?.tinh === 'string' ? req.body.tinh.slice(0, 40) : '';
   if (!tinh) return res.status(400).json({ success: false });
   const b = docBang();
   b.thang[tinh] = (b.thang[tinh] ?? 0) + 1;
+  b.thangTuan[tinh] = (b.thangTuan[tinh] ?? 0) + 1;
   try {
     fs.mkdirSync(path.dirname(BANG_FILE), { recursive: true });
-    fs.writeFileSync(BANG_FILE, JSON.stringify(b));
+    fs.writeFileSync(BANG_FILE, JSON.stringify(b, null, 2));
   } catch (err) {
     console.error('Không lưu được data/bang-vang.json:', err);
   }
   res.json(b);
 });
 
-// ---------- Giọng đọc ----------
+// ---------- Hồ sơ Cấp bậc Tay Chèo Trọn Đời (data/tay-cheo.json) ----------
+const TAY_CHEO_FILE = path.join(__dirname, 'data', 'tay-cheo.json');
+export interface HoSoTayCheo {
+  name: string;
+  tinh: string;
+  tongNhip: number;
+  sacPhong: number;
+  updatedAt: number;
+}
+let tayCheoMap: Record<string, HoSoTayCheo> = {};
+try {
+  tayCheoMap = JSON.parse(fs.readFileSync(TAY_CHEO_FILE, 'utf8')) || {};
+} catch {
+  tayCheoMap = {};
+}
+
+function luuTayCheo() {
+  try {
+    const entries = Object.entries(tayCheoMap);
+    if (entries.length > 2500) {
+      entries.sort((a, b) => b[1].tongNhip - a[1].tongNhip || b[1].updatedAt - a[1].updatedAt);
+      tayCheoMap = Object.fromEntries(entries.slice(0, 2000));
+    }
+    fs.mkdirSync(path.dirname(TAY_CHEO_FILE), { recursive: true });
+    fs.writeFileSync(TAY_CHEO_FILE, JSON.stringify(tayCheoMap));
+  } catch (err) {
+    console.error('Không lưu được data/tay-cheo.json:', err);
+  }
+}
+
+app.get('/api/tay-cheo', (_req, res) => res.json(tayCheoMap));
+app.post('/api/tay-cheo', (req, res) => {
+  const list = Array.isArray(req.body?.list) ? req.body.list : [];
+  const mvpId = typeof req.body?.mvpId === 'string' ? req.body.mvpId : '';
+  const now = Date.now();
+  for (const item of list) {
+    const id = typeof item?.id === 'string' ? item.id.slice(0, 60) : '';
+    const nhip = Math.max(0, Math.round(Number(item?.nhip) || 0));
+    if (!id || nhip <= 0) continue;
+    const prev = tayCheoMap[id] ?? { name: '', tinh: '', tongNhip: 0, sacPhong: 0, updatedAt: now };
+    tayCheoMap[id] = {
+      name: typeof item.name === 'string' && item.name ? item.name.slice(0, 40) : prev.name,
+      tinh: typeof item.tinh === 'string' && item.tinh ? item.tinh.slice(0, 40) : prev.tinh,
+      tongNhip: prev.tongNhip + nhip,
+      sacPhong: prev.sacPhong + (id === mvpId ? 1 : 0),
+      updatedAt: now,
+    };
+  }
+  luuTayCheo();
+  res.json({ success: true });
+});
+
+// ---------- Giọng đọc: VieNeu-TTS (stdio worker) + Edge TTS + Google TTS ----------
 const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function splitText(text: string, max = 190): string[] {
@@ -448,15 +593,15 @@ function splitText(text: string, max = 190): string[] {
   return chunks;
 }
 
-// Edge chặn (429) khi nhiều yêu cầu dồn cùng lúc: xếp hàng gọi từng câu một, cách nhau tối thiểu 350 ms
+// Xếp hàng gọi Edge tuần tự cách nhau >= 350ms + chống UnhandledPromiseRejection khi timeout
 let edgeHang: Promise<unknown> = Promise.resolve();
 let edgeLanCuoi = 0;
-function edgeTts(text: string, rate: number): Promise<Buffer> {
+function edgeTts(text: string, rate: number, voiceName: string): Promise<Buffer> {
   const viec = edgeHang.then(async () => {
     const cho = edgeLanCuoi + 350 - Date.now();
     if (cho > 0) await new Promise((r) => setTimeout(r, cho));
     try {
-      return await edgeTtsMot(text, rate);
+      return await edgeTtsMot(text, rate, voiceName);
     } finally {
       edgeLanCuoi = Date.now();
     }
@@ -465,20 +610,29 @@ function edgeTts(text: string, rate: number): Promise<Buffer> {
   return viec;
 }
 
-async function edgeTtsMot(text: string, rate: number): Promise<Buffer> {
+async function edgeTtsMot(text: string, rate: number, voiceName: string): Promise<Buffer> {
   const tts = new MsEdgeTTS();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await tts.setMetadata(TTS_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
-    const { audioStream } = tts.toStream(escapeXml(text), { rate: `${Math.round((rate - 1) * 100)}%`, pitch: TTS_PITCH });
+    await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
+    const pct = Math.round((rate - 1) * 100);
+    const { audioStream } = tts.toStream(escapeXml(text), {
+      rate: `${pct >= 0 ? '+' : ''}${pct}%`,
+      pitch: TTS_PITCH,
+    });
     const chunks: Buffer[] = [];
     const read = (async () => {
       for await (const c of audioStream) chunks.push(c as Buffer);
     })();
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Edge TTS timeout')), 20000));
+    read.catch(() => {}); // Chống crash UnhandledPromiseRejection khi timeout đóng stream ở finally
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Edge TTS timeout')), 20_000);
+    });
     await Promise.race([read, timeout]);
     if (chunks.length === 0) throw new Error('Edge TTS không trả âm thanh');
     return Buffer.concat(chunks);
   } finally {
+    clearTimeout(timer);
     tts.close();
   }
 }
@@ -499,92 +653,307 @@ async function googleTts(text: string): Promise<Buffer> {
   return Buffer.concat(parts);
 }
 
-const ttsCache = new Map<string, Buffer>();
-let edgeNghiDen = 0;
-let edgeDaBao = false;
-// Giọng VieNeu (E:\02_AI\VieNeu-TTS chạy server ở cổng 8000, card đồ hoạ tạo giọng).
-// Vừa tạo vừa phát nên gần như không phải chờ. VieNeu chưa bật hoặc lỗi thì tự quay về giọng Edge.
-// Đổi giọng: đặt biến VIENEU_VOICE (vd "Thiện Minh"); để trống = chỉ dùng Edge.
-const VIENEU_URL = process.env.VIENEU_URL || 'http://127.0.0.1:8000';
-// Chủ kênh chưa cài VieNeu (2026-11-16): mặc định để trống = chỉ dùng Edge. Cài rồi thì đặt VIENEU_VOICE=Adam bựa trong BAT-LIVE.bat
-const VIENEU_VOICE = process.env.VIENEU_VOICE ?? '';
+// ---------- VieNeu-TTS v3 Turbo Embedded Worker ----------
+interface VieneuVoiceInfo {
+  id: string;
+  name: string;
+  description: string;
+  gender: string;
+}
+interface VieneuJob {
+  id: number;
+  text: string;
+  voice: string;
+  res: express.Response;
+  parts: Buffer[];
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (ok: boolean) => void;
+}
+
+let activeVieneuVoice =
+  settings.vieneuVoice !== undefined ? settings.vieneuVoice : (process.env.VIENEU_VOICE ?? 'Adam bựa');
+let vieneuState: 'loading' | 'ready' | 'unavailable' = 'loading';
+let vieneuVoices: VieneuVoiceInfo[] = [];
 const vieneuCache = new Map<string, Buffer>();
-// VieNeu chưa bật / đang nạp mô hình: lỗi 1 lần thì khỏi gọi lại trong 30 giây (đỡ chờ, đỡ rác log)
-let vieneuNghiDen = 0;
-let vieneuDaBao = false;
-async function vieneuTts(text: string, res: express.Response): Promise<boolean> {
-  if (Date.now() < vieneuNghiDen && !vieneuCache.has(text)) return false;
-  const cached = vieneuCache.get(text);
+let vieneuProc: ChildProcessByStdio<Writable, Readable, null> | null = null;
+let nextJobId = 1;
+let currentJob: VieneuJob | null = null;
+const priorityJobs: VieneuJob[] = [];
+const prefetchJobs: VieneuJob[] = [];
+
+const getVieneuStatus = () => ({
+  state: vieneuState,
+  voice: activeVieneuVoice,
+  voices: vieneuVoices,
+});
+
+function resolveVieneuDir(): string {
+  const candidates = [
+    process.env.VIENEU_DIR,
+    path.join(__dirname, 'VieNeu-TTS'),
+    path.join(__dirname, '..', 'LIVE-TRANGNGUYEN', 'VieNeu-TTS'),
+    path.join(__dirname, '..', 'LIVE-CLASS', 'VieNeu-TTS'),
+    'E:\\02_AI\\VieNeu-TTS',
+  ].filter((x): x is string => !!x);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, '.venv', 'Scripts', 'python.exe'))) return dir;
+  }
+  return path.join(__dirname, 'VieNeu-TTS');
+}
+
+function pumpVieneuQueue() {
+  if (currentJob || vieneuState !== 'ready' || !vieneuProc?.stdin.writable) return;
+  while (priorityJobs.length > 0 || prefetchJobs.length > 0) {
+    const job = priorityJobs.shift() ?? prefetchJobs.shift()!;
+    if (job.res.writableEnded || job.res.destroyed) {
+      clearTimeout(job.timer);
+      job.resolve(true);
+      continue;
+    }
+    const cacheKey = `${job.voice}|${job.text}`;
+    const cached = vieneuCache.get(cacheKey);
+    if (cached) {
+      clearTimeout(job.timer);
+      job.res.setHeader('Content-Type', 'audio/wav');
+      job.res.send(cached);
+      job.resolve(true);
+      continue;
+    }
+    currentJob = job;
+    try {
+      vieneuProc.stdin.write(JSON.stringify({ id: job.id, text: job.text, voice: job.voice }) + '\n');
+      return;
+    } catch {
+      clearTimeout(job.timer);
+      currentJob = null;
+      job.resolve(false);
+    }
+  }
+}
+
+function startVieneuWorker() {
+  const vieneuDir = resolveVieneuDir();
+  const pyExe = path.join(vieneuDir, '.venv', 'Scripts', 'python.exe');
+  const workerScript = path.join(__dirname, 'tools', 'vieneu-worker.py');
+  if (!fs.existsSync(pyExe) || !fs.existsSync(workerScript)) {
+    console.log('[VieNeu] Chưa cài môi trường Python VieNeu-TTS, tự động dùng giọng Microsoft Edge.');
+    vieneuState = 'unavailable';
+    broadcast('vieneu', getVieneuStatus());
+    return;
+  }
+
+  console.log(`[VieNeu] Đang khởi động AI Voice tại: ${vieneuDir}`);
+  vieneuState = 'loading';
+  broadcast('vieneu', getVieneuStatus());
+
+  const proc = spawn(pyExe, ['-u', workerScript], {
+    cwd: vieneuDir,
+    stdio: ['pipe', 'pipe', 'inherit'],
+    windowsHide: true,
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
+      HF_HUB_OFFLINE: '1',
+      VIENEU_PRECISION: process.env.VIENEU_PRECISION || 'int8',
+      VIENEU_WATERMARK: '0',
+    },
+  });
+  vieneuProc = proc;
+
+  let rxBuf: Buffer = Buffer.alloc(0);
+  proc.stdout.on('data', (chunk: Buffer) => {
+    rxBuf = rxBuf.length === 0 ? chunk : Buffer.concat([rxBuf, chunk]);
+    while (rxBuf.length >= 9) {
+      const frameType = rxBuf.readUInt8(0);
+      const reqId = rxBuf.readUInt32BE(1);
+      const payloadLen = rxBuf.readUInt32BE(5);
+      if (rxBuf.length < 9 + payloadLen) break;
+      const payload = rxBuf.subarray(9, 9 + payloadLen);
+      rxBuf = rxBuf.subarray(9 + payloadLen);
+
+      if (frameType === 1) {
+        try {
+          const info = JSON.parse(payload.toString('utf8'));
+          vieneuVoices = Array.isArray(info.voices) ? info.voices : [];
+        } catch {
+          vieneuVoices = [];
+        }
+        vieneuState = 'ready';
+        broadcast('vieneu', getVieneuStatus());
+        pumpVieneuQueue();
+      } else if (frameType === 2) {
+        if (currentJob && currentJob.id === reqId) {
+          if (!currentJob.res.headersSent) {
+            currentJob.res.setHeader('Content-Type', 'audio/wav');
+            currentJob.res.setHeader('Cache-Control', 'no-store');
+          }
+          currentJob.parts.push(Buffer.from(payload));
+          if (!currentJob.res.writableEnded) currentJob.res.write(payload);
+        }
+      } else if (frameType === 3) {
+        if (currentJob && currentJob.id === reqId) {
+          const job = currentJob;
+          currentJob = null;
+          clearTimeout(job.timer);
+          if (!job.res.writableEnded) job.res.end();
+          if (job.parts.length > 0) {
+            const cacheKey = `${job.voice}|${job.text}`;
+            vieneuCache.set(cacheKey, Buffer.concat(job.parts));
+            if (vieneuCache.size > 150) vieneuCache.delete(vieneuCache.keys().next().value!);
+          }
+          job.resolve(true);
+          pumpVieneuQueue();
+        }
+      } else if (frameType === 4) {
+        const errMsg = payload.toString('utf8');
+        console.warn('[VieNeu Worker lỗi]', errMsg);
+        if (currentJob && currentJob.id === reqId) {
+          const job = currentJob;
+          currentJob = null;
+          clearTimeout(job.timer);
+          if (job.res.headersSent) {
+            if (!job.res.writableEnded) job.res.end();
+            job.resolve(true);
+          } else {
+            job.resolve(false);
+          }
+          pumpVieneuQueue();
+        }
+      }
+    }
+  });
+
+  proc.on('exit', (code) => {
+    if (vieneuProc !== proc) return;
+    vieneuProc = null;
+    console.warn(`[VieNeu] Worker đã thoát (code=${code})`);
+    if (currentJob) {
+      const job = currentJob;
+      currentJob = null;
+      clearTimeout(job.timer);
+      if (job.res.headersSent) {
+        if (!job.res.writableEnded) job.res.end();
+        job.resolve(true);
+      } else {
+        job.resolve(false);
+      }
+    }
+    while (priorityJobs.length > 0) {
+      const j = priorityJobs.shift()!;
+      clearTimeout(j.timer);
+      j.resolve(false);
+    }
+    while (prefetchJobs.length > 0) {
+      const j = prefetchJobs.shift()!;
+      clearTimeout(j.timer);
+      j.resolve(false);
+    }
+    vieneuState = 'unavailable';
+    broadcast('vieneu', getVieneuStatus());
+  });
+}
+
+const cleanupWorker = () => {
+  if (vieneuProc) {
+    try {
+      vieneuProc.kill();
+    } catch {
+      // bỏ qua
+    }
+    vieneuProc = null;
+  }
+};
+process.on('exit', cleanupWorker);
+process.on('SIGINT', () => {
+  cleanupWorker();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  cleanupWorker();
+  process.exit(0);
+});
+
+const isEdgeSelection = (v: string) => !v || v === 'edge:M' || v === 'edge:F';
+
+async function vieneuTts(text: string, res: express.Response, isPrefetch: boolean): Promise<boolean> {
+  const voice = activeVieneuVoice;
+  if (isEdgeSelection(voice)) return false;
+  const cacheKey = `${voice}|${text}`;
+  const cached = vieneuCache.get(cacheKey);
   if (cached) {
     res.setHeader('Content-Type', 'audio/wav');
     res.send(cached);
     return true;
   }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 5000); // chỉ chờ tối đa 5 giây cho tới byte đầu
-  try {
-    const r = await fetch(`${VIENEU_URL}/v1/audio/speech`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'vieneu', voice: VIENEU_VOICE, input: text, response_format: 'wav' }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-    res.setHeader('Content-Type', 'audio/wav');
-    res.setHeader('Cache-Control', 'no-store');
-    const parts: Buffer[] = [];
-    for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
-      const b = Buffer.from(chunk);
-      parts.push(b);
-      res.write(b);
-    }
-    res.end();
-    if (vieneuDaBao) {
-      vieneuDaBao = false;
-      console.log('[Giọng] VieNeu đã chạy lại');
-    }
-    vieneuCache.set(text, Buffer.concat(parts));
-    if (vieneuCache.size > 100) vieneuCache.delete(vieneuCache.keys().next().value!);
-    return true;
-  } catch (err) {
-    clearTimeout(timer);
-    if (res.headersSent) {
-      res.end();
-      return true;
-    }
-    vieneuNghiDen = Date.now() + 30_000;
-    if (!vieneuDaBao) {
-      vieneuDaBao = true;
-      console.warn(`[Giọng] VieNeu chưa trả lời ở ${VIENEU_URL} (${err instanceof Error ? err.message : err}). Tạm dùng giọng Edge, 30 giây thử lại VieNeu một lần.`);
-    }
-    return false;
-  }
+  if (vieneuState === 'unavailable') return false;
+  if (vieneuState === 'loading' && !isPrefetch) return false;
+
+  return new Promise<boolean>((resolve) => {
+    const id = nextJobId++;
+    const timeoutMs = isPrefetch ? 45_000 : 12_000;
+    const job: VieneuJob = {
+      id,
+      text,
+      voice,
+      res,
+      parts: [],
+      resolve,
+      timer: setTimeout(() => {
+        const idx1 = priorityJobs.indexOf(job);
+        if (idx1 !== -1) priorityJobs.splice(idx1, 1);
+        const idx2 = prefetchJobs.indexOf(job);
+        if (idx2 !== -1) prefetchJobs.splice(idx2, 1);
+        if (currentJob !== job) resolve(false);
+      }, timeoutMs),
+    };
+    if (isPrefetch) prefetchJobs.push(job);
+    else priorityJobs.push(job);
+    pumpVieneuQueue();
+  });
 }
+
+app.get('/api/tts/status', (_req, res) => res.json(getVieneuStatus()));
+app.post('/api/tts/voice', (req, res) => {
+  const v = typeof req.body?.voice === 'string' ? req.body.voice.trim().slice(0, 60) : '';
+  activeVieneuVoice = v;
+  saveSettings({ vieneuVoice: v });
+  broadcast('vieneu', getVieneuStatus());
+  broadcast('control', { action: 'setVoice', text: v || 'edge:M' });
+  res.json({ success: true, ...getVieneuStatus() });
+});
+
+const ttsCache = new Map<string, Buffer>();
+let edgeNghiDen = 0;
+let edgeDaBao = false;
 
 app.get('/api/tts', async (req, res) => {
   try {
     const raw = String(req.query.text || '').trim().slice(0, 1500);
     if (!raw) return res.status(400).send('Thiếu text');
     const rate = Math.min(1.5, Math.max(0.5, Number(req.query.rate) || 1));
-    if (VIENEU_VOICE && (await vieneuTts(raw, res))) return;
-    // Edge / Google không hiểu thẻ cảm xúc [cười] [thở dài]...: bỏ đi để khỏi đọc thành chữ
+    const isPrefetch = req.query.prefetch === '1';
+
+    if (!isEdgeSelection(activeVieneuVoice) && (await vieneuTts(raw, res, isPrefetch))) return;
+
     const text = raw.replace(/\[[^\]]*\]\s*/g, '').trim();
     if (!text) return res.status(204).end();
-    const key = `${rate}|${text}`;
+
+    const edgeVoiceName = activeVieneuVoice === 'edge:F' ? TTS_VOICE_F : TTS_VOICE_M;
+    const key = `${edgeVoiceName}|${rate}|${text}`;
     let audio = ttsCache.get(key);
     if (!audio) {
-      if (Date.now() < edgeNghiDen) audio = await googleTts(text);
-      else
+      if (Date.now() < edgeNghiDen) {
+        audio = await googleTts(text);
+      } else {
         try {
-          audio = await edgeTts(text, rate);
+          audio = await edgeTts(text, rate, edgeVoiceName);
           if (edgeDaBao) {
             edgeDaBao = false;
-            console.log('[Giọng] Edge đã chạy lại');
+            console.log('[Giọng] Edge TTS đã chạy lại bình thường');
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          // 429 = Edge chặn tạm vì gọi dồn dập: nghỉ 60 giây, trong lúc đó dùng giọng Google
           edgeNghiDen = Date.now() + (msg.includes('429') ? 60_000 : 15_000);
           if (!edgeDaBao) {
             edgeDaBao = true;
@@ -592,6 +961,7 @@ app.get('/api/tts', async (req, res) => {
           }
           audio = await googleTts(text);
         }
+      }
       ttsCache.set(key, audio);
       if (ttsCache.size > 200) ttsCache.delete(ttsCache.keys().next().value!);
     }
@@ -604,16 +974,33 @@ app.get('/api/tts', async (req, res) => {
   }
 });
 
-// ---------- API riêng của game: thêm bên dưới ----------
+// ---------- Khởi động & Tự lùi cổng nếu bận ----------
+function listenOnAvailablePort(startPort: number, maxTries = 10): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let port = startPort;
+    const tryListen = () => {
+      const srv = http.createServer(app);
+      srv.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE' && port < startPort + maxTries) {
+          console.warn(`[Server] Cổng ${port} đang bận, tự động chuyển sang cổng ${port + 1}...`);
+          port++;
+          tryListen();
+        } else {
+          reject(err);
+        }
+      });
+      srv.listen(port, '127.0.0.1', () => resolve(port));
+    };
+    tryListen();
+  });
+}
 
-// ---------- Khởi động ----------
 async function start() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distDir = path.join(__dirname, 'dist');
+  const distIndex = path.join(distDir, 'index.html');
+  if (process.env.NODE_ENV !== 'production' || !fs.existsSync(distIndex)) {
     const { createServer } = await import('vite');
     const vite = await createServer({
-      // LIVE_MODE=1 (BAT-LIVE.bat): tắt tự tải lại, sửa code không làm trang stage reset giữa live
-      // Live: tắt hẳn kênh tự tải lại (ws) để không đụng cổng 24678 của game khác đang chạy.
-      // Lúc sửa code: dùng cổng riêng 24681 cho kênh tự tải lại, game khác giữ 24678, 24680.
       server:
         process.env.LIVE_MODE === '1'
           ? { middlewareMode: true, hmr: false, ws: false }
@@ -622,19 +1009,19 @@ async function start() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+    app.use(express.static(distDir));
+    app.get('*', (_req, res) => res.sendFile(distIndex));
   }
 
-  // Chỉ nghe trên máy này: API không có đăng nhập, người cùng Wi-Fi không được điều khiển giọng đọc
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`Server chạy ở http://localhost:${PORT}  |  Link LIVE Studio: http://lvh.me:${PORT}/?view=stage`);
-    // lần trước đang kết nối mà server bị tắt / bật lại: tự kết nối lại tài khoản đó
-    if (wantUser) {
-      console.log(`[TikTok] Tự kết nối lại @${wantUser} (lần trước đang kết nối)`);
-      connectTikTok(wantUser).catch((err) => scheduleReconnect(`Chưa kết nối được (${err instanceof Error ? err.message : err})`));
-    }
-  });
+  startVieneuWorker();
+
+  actualPort = await listenOnAvailablePort(BASE_PORT);
+  liveStats.port = actualPort;
+  console.log(`Server chạy ở http://localhost:${actualPort}  |  Link LIVE Studio: http://lvh.me:${actualPort}/?view=stage`);
+  if (wantUser) {
+    console.log(`[TikTok] Tự kết nối lại @${wantUser} (lần trước đang kết nối)`);
+    connectTikTok(wantUser).catch((err) => scheduleReconnect(`Chưa kết nối được (${err instanceof Error ? err.message : err})`));
+  }
 }
 
 start();

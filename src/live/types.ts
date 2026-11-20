@@ -1,4 +1,4 @@
-// Dữ liệu server.ts gửi xuống qua SSE. Dùng chung cho mọi game.
+// Dữ liệu server.ts gửi xuống qua SSE.
 
 export interface LiveStatus {
   isConnected: boolean;
@@ -7,7 +7,32 @@ export interface LiveStatus {
   roomId: string;
   viewerCount: number;
   totalLikes: number;
+  port?: number;
   error?: string;
+}
+
+export interface VieneuVoice {
+  id: string;
+  name: string;
+  description: string;
+  gender: string;
+}
+
+export interface VieneuStatus {
+  state: 'loading' | 'ready' | 'unavailable';
+  voice: string; // tên giọng VieNeu, hoặc 'edge:M' / 'edge:F' / ''
+  voices: VieneuVoice[];
+}
+
+export interface CaiDat {
+  tieuDe: string;
+  tieuDePhu: string;
+  duaSec: number;
+  anQua: boolean;
+  choDoiGhe: boolean;
+  musicVol: number; // 0 - 100
+  sfxVol: number;   // 0 - 100
+  mcVol: number;    // 0 - 100
 }
 
 export interface ChatEvent {
@@ -16,7 +41,7 @@ export interface ChatEvent {
   comment: string;
   avatar: string;
   timestamp: number;
-  createTime?: number; // giờ TikTok lúc người xem gửi (ms)
+  createTime?: number;
 }
 
 export interface GiftEvent {
@@ -24,8 +49,8 @@ export interface GiftEvent {
   nickname: string;
   giftName: string;
   giftId: number;
-  diamondCount: number; // xu của 1 món
-  repeatCount: number; // số món MỚI trong lần này (server đã trừ phần combo cũ)
+  diamondCount: number;
+  repeatCount: number;
   avatar: string;
   timestamp: number;
 }
@@ -41,11 +66,11 @@ export interface LikeEvent {
   username: string;
   nickname: string;
   likeCount: number;
-  totalLikes: number; // tổng tim cả phòng
+  totalLikes: number;
 }
 
 export interface ControlCommand {
-  action: 'speak' | 'setRate' | 'reset' | 'setName' | 'custom';
+  action: 'speak' | 'setRate' | 'reset' | 'setName' | 'setVoice' | 'custom';
   text?: string;
 }
 
@@ -53,12 +78,14 @@ export interface LiveHandlers {
   onStatus?: (s: LiveStatus) => void;
   onChat?: (e: ChatEvent) => void;
   onGift?: (e: GiftEvent) => void;
-  onMember?: (e: UserEvent) => void; // người mới vào phòng
+  onMember?: (e: UserEvent) => void;
   onFollow?: (e: UserEvent) => void;
   onShare?: (e: UserEvent) => void;
   onLike?: (e: LikeEvent) => void;
   onViewers?: (count: number) => void;
   onControl?: (c: ControlCommand) => void;
-  onGameState?: (s: any) => void; // ảnh chụp màn hình game do trang stage gửi
-  onCaiDat?: (c: { tieuDe: string }) => void; // tên game (trang điều khiển sửa)
+  onGameState?: (s: any) => void;
+  onCaiDat?: (c: CaiDat) => void;
+  onVieneu?: (v: VieneuStatus) => void;
+  onStages?: (count: number) => void;
 }

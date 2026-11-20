@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 520" width="1800" height="520">
+  <defs>
+    <linearGradient id="sqG" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d3b49" />
+      <stop offset="100%" stop-color="#082834" />
+    </linearGradient>
+    <linearGradient id="gG" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="cG" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#be123c" />
+    </linearGradient>
+  </defs>
+
+  <!-- Left Squircle Icon -->
+  <g transform="translate(40, 40)">
+    <rect x="0" y="0" width="440" height="440" rx="104" fill="url(#sqG)" stroke="url(#gG)" stroke-width="5" />
+    <path d="M 40 345 Q 130 315 220 345 T 400 345" fill="none" stroke="#2dd4bf" stroke-width="8" stroke-linecap="round" />
+    <path d="M 65 265 C 105 325, 325 325, 375 255 L 400 195 C 370 215, 345 230, 320 235 L 110 235 C 90 225, 78 205, 70 180 Z" fill="url(#gG)" />
+    <path d="M 355 220 C 370 175, 405 140, 385 105 C 365 110, 348 128, 340 148 C 324 132, 308 128, 290 136 C 310 152, 322 172, 318 205 Z" fill="url(#gG)" />
+    <circle cx="366" cy="138" r="6" fill="#dc2626" />
+    <path d="M 160 95 L 160 225" stroke="#fef08a" stroke-width="6" stroke-linecap="round" />
+    <path d="M 163 100 L 285 125 L 163 162 Z" fill="url(#cG)" stroke="#fef08a" stroke-width="2.5" />
+    <rect x="125" y="34" width="190" height="40" rx="20" fill="#e11d48" />
+    <text x="220" y="61" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="20" font-weight="900" fill="#ffffff" text-anchor="middle">● LIVE 9:16</text>
+  </g>
+
+  <!-- Right Wordmark -->
+  <g transform="translate(530, 115)">
+    <text x="0" y="95" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="92" font-weight="900" fill="url(#gG)">
+      LIVE-BOAT RACING
+    </text>
+    <text x="0" y="198" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="76" font-weight="900" fill="#ffffff">
+      TIKTOK <tspan fill="#2dd4bf">34 TỈNH</tspan>
+    </text>
+    <rect x="820" y="140" width="145" height="54" rx="16" fill="#f59e0b" />
+    <text x="892" y="179" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="32" font-weight="900" fill="#0f172a" text-anchor="middle">
+      v2.0
+    </text>
+    <text x="0" y="268" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="31" font-weight="700" fill="#94a3b8">
+      34 Provinces &amp; Islands • 23 Rivers • 25 AI Voices (VieNeu-TTS) • Safe-Zone 1080×1920
+    </text>
+  </g>
+</svg>

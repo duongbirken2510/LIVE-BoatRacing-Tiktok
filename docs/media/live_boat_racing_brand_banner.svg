@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1260" width="2400" height="1260">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#04131a" />
+      <stop offset="45%" stop-color="#07222c" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <radialGradient id="glowAmber" cx="25%" cy="48%" r="45%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.28" />
+      <stop offset="60%" stop-color="#0ea5e9" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#04131a" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowTeal" cx="80%" cy="30%" r="45%">
+      <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#04131a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="squircleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d3b49" />
+      <stop offset="50%" stop-color="#082834" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="45%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="crimsonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#be123c" />
+    </linearGradient>
+    <filter id="dropShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+  </defs>
+
+  <!-- Studio Background -->
+  <rect width="2400" height="1260" fill="url(#bgGrad)" />
+  <rect width="2400" height="1260" fill="url(#glowAmber)" />
+  <rect width="2400" height="1260" fill="url(#glowTeal)" />
+
+  <!-- Subtle River Wave Pattern Lines -->
+  <g stroke="#2dd4bf" stroke-opacity="0.08" stroke-width="2" fill="none">
+    <path d="M 0 980 Q 400 940 800 980 T 1600 980 T 2400 980" />
+    <path d="M 0 1030 Q 400 990 800 1030 T 1600 1030 T 2400 1030" />
+    <path d="M 0 1080 Q 400 1040 800 1080 T 1600 1080 T 2400 1080" />
+  </g>
+
+  <!-- Outer Frame Border -->
+  <rect x="44" y="44" width="2312" height="1172" rx="36" fill="none" stroke="#fbbf24" stroke-opacity="0.22" stroke-width="2" />
+
+  <!-- LEFT: 3D Glassmorphic Squircle Emblem -->
+  <g transform="translate(115, 210)" filter="url(#dropShadow)">
+    <rect x="0" y="0" width="540" height="540" rx="128" fill="url(#squircleGrad)" stroke="url(#goldGrad)" stroke-width="5" />
+    <rect x="18" y="18" width="504" height="504" rx="112" fill="none" stroke="#2dd4bf" stroke-opacity="0.28" stroke-width="2" />
+
+    <!-- Stylized Water Waves inside Squircle -->
+    <path d="M 60 395 Q 165 355 270 395 T 480 395 L 480 445 Q 375 485 270 445 T 60 445 Z" fill="#0ea5e9" fill-opacity="0.25" />
+    <path d="M 45 430 Q 160 390 270 430 T 495 430" fill="none" stroke="#2dd4bf" stroke-width="8" stroke-linecap="round" />
+    <path d="M 85 468 Q 180 438 270 468 T 455 468" fill="none" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" stroke-opacity="0.7" />
+
+    <!-- Golden Dragon Boat Hull & Prow -->
+    <path d="M 75 315 C 125 385, 395 385, 455 305 L 485 235 C 450 260, 420 278, 390 285 L 135 285 C 110 275, 95 250, 85 220 Z" fill="url(#goldGrad)" />
+    <path d="M 110 302 L 420 302" stroke="#78350f" stroke-width="6" stroke-linecap="round" />
+
+    <!-- Dragon Head at Prow (Right) -->
+    <path d="M 435 265 C 455 210, 495 170, 470 130 C 445 135, 425 155, 415 180 C 395 160, 375 155, 355 165 C 380 185, 395 210, 390 250 Z" fill="url(#goldGrad)" />
+    <circle cx="448" cy="168" r="8" fill="#dc2626" />
+
+    <!-- Rowers / Paddles & Vietnamese Flag Pennant -->
+    <g stroke="#fef08a" stroke-width="7" stroke-linecap="round">
+      <line x1="175" y1="265" x2="150" y2="375" />
+      <line x1="235" y1="265" x2="210" y2="375" />
+      <line x1="295" y1="265" x2="270" y2="375" />
+      <line x1="355" y1="265" x2="330" y2="375" />
+    </g>
+
+    <!-- Red & Gold Flag Banner on Boat -->
+    <path d="M 195 115 L 195 275" stroke="#fef08a" stroke-width="7" stroke-linecap="round" />
+    <path d="M 198 120 L 345 150 L 198 195 Z" fill="url(#crimsonGrad)" stroke="#fef08a" stroke-width="3" />
+    <polygon points="252,142 257,156 272,156 260,165 264,179 252,170 240,179 244,165 232,156 247,156" fill="#fef08a" />
+
+    <!-- Top Badge inside Icon: 9:16 LIVE -->
+    <rect x="135" y="42" width="270" height="46" rx="23" fill="#e11d48" stroke="#fecdd3" stroke-width="2" />
+    <text x="270" y="73" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle">● TIKTOK LIVE 9:16</text>
+  </g>
+
+  <!-- RIGHT: Typography, Subtitle & Feature Pills -->
+  <g transform="translate(715, 215)">
+    <!-- Top Eyebrow Pill (Generous 1080px width) -->
+    <rect x="0" y="0" width="1080" height="56" rx="28" fill="#0d3b49" stroke="#2dd4bf" stroke-width="2.5" />
+    <text x="540" y="37" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#5eead4" text-anchor="middle">
+      ★ GAME ĐUA GHE TƯƠNG TÁC THỜI GIAN THỰC • REAL-TIME INTERACTIVE GAME ★
+    </text>
+
+    <!-- Main Title Line 1 -->
+    <text x="0" y="162" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="98" font-weight="900" fill="url(#goldGrad)">
+      LIVE-BOAT RACING
+    </text>
+
+    <!-- Main Title Line 2 -->
+    <text x="0" y="272" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="82" font-weight="900" fill="#ffffff">
+      TIKTOK <tspan fill="#2dd4bf">34 TỈNH THÀNH</tspan>
+    </text>
+    <rect x="1315" y="207" width="165" height="62" rx="18" fill="#f59e0b" />
+    <text x="1397" y="250" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="36" font-weight="900" fill="#0f172a" text-anchor="middle">
+      v2.0
+    </text>
+
+    <!-- Bilingual Subtitle -->
+    <text x="0" y="346" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="31" font-weight="700" fill="#e2e8f0">
+      Đua Ghe Ngo &amp; Thuyền Rồng Tương Tác Chuẩn Safe-Zone 1080×1920 • 25 Giọng AI VieNeu-TTS
+    </text>
+    <text x="0" y="394" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="25" font-weight="600" fill="#94a3b8">
+      Real-Time 9:16 TikTok LIVE Dragon Boat Racing • 34 Provinces &amp; Islands • 23 Rivers • Embedded AI Commentator
+    </text>
+
+    <!-- 4 Feature Pills (2x2 Grid, Generous Width 765px each, font-size 24.5, text-anchor="middle") -->
+    <g transform="translate(0, 445)">
+      <!-- Pill 1 -->
+      <rect x="0" y="0" width="765" height="78" rx="22" fill="#0b2935" stroke="#fbbf24" stroke-width="2.5" />
+      <text x="382" y="48" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="25" font-weight="800" fill="#fde68a" text-anchor="middle">
+        ● 25 Giọng AI VieNeu-TTS ("Adam bựa") + Edge TTS
+      </text>
+
+      <!-- Pill 2 -->
+      <rect x="795" y="0" width="765" height="78" rx="22" fill="#0b2935" stroke="#2dd4bf" stroke-width="2.5" />
+      <text x="1177" y="48" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="25" font-weight="800" fill="#5eead4" text-anchor="middle">
+        ● 34 Tỉnh Mới + Tỉnh Cũ + Hoàng Sa &amp; Trường Sa
+      </text>
+
+      <!-- Pill 3 -->
+      <rect x="0" y="102" width="765" height="78" rx="22" fill="#0b2935" stroke="#38bdf8" stroke-width="2.5" />
+      <text x="382" y="150" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="25" font-weight="800" fill="#bae6fd" text-anchor="middle">
+        ● 23 Chặng Sông 3 Miền • Cá Chép Vượt Vũ Môn
+      </text>
+
+      <!-- Pill 4 -->
+      <rect x="795" y="102" width="765" height="78" rx="22" fill="#0b2935" stroke="#f43f5e" stroke-width="2.5" />
+      <text x="1177" y="150" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="25" font-weight="800" fill="#fecdd3" text-anchor="middle">
+        ● Chuẩn Safe-Zone 9:16 (1080×1920) • Chống Ghe Ma
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Author & Architecture Bar -->
+  <g transform="translate(115, 1015)">
+    <rect x="0" y="0" width="2170" height="110" rx="28" fill="#061821" fill-opacity="0.92" stroke="#2dd4bf" stroke-opacity="0.35" stroke-width="2" />
+    <text x="50" y="67" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#fbbf24">
+      ⚡ React 19 + Express SSE + VieNeu ONNX INT8 + WebAudio Synth
+    </text>
+    <text x="2120" y="67" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#5eead4" text-anchor="end">
+      Designed by Duong Birken • duongbirken.deta.vn
+    </text>
+  </g>
+</svg>

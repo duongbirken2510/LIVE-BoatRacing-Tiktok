@@ -1,12 +1,14 @@
 {
-  "name": "ghe-ngo-34-tinh",
+  "name": "live-boat-racing-tiktok",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
+  "description": "LIVE-BOAT RACING TIKTOK — Game đua ghe tương tác thời gian thực chuẩn Safe-Zone cho TikTok LIVE, tích hợp 25 giọng AI VieNeu-TTS",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "vite build",
+    "test": "tsx src/game/dua.check.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

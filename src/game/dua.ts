@@ -1,24 +1,33 @@
 /**
- * Lõi luật chơi Ghe Ngo 34 Tỉnh (không React, không phát tiếng). Test: npx tsx src/game/dua.check.ts
+ * Lõi luật chơi Ghe Ngo 34 Tỉnh (LIVE-DUAGHE — Phiên bản nâng cấp Duong Birken).
+ * Không phụ thuộc React hay Web Audio. Kiểm thử tự động: `npx tsx src/game/dua.check.ts`.
  *
- * Một vòng: chuyen (giới thiệu chặng) -> dua (150 giây, 30 giây cuối là nước rút)
- *           -> ketQua -> sacPhong -> chonSong -> vòng sau.
- * Người xem: gõ tên tỉnh 1 lần để lên ghe; thả tim = chèo (+1 m mỗi tim); tặng quà = ghe tăng tốc.
- * Giữa vòng có sự kiện ngẫu nhiên: cá chép vàng (đủ tim thì vượt vũ môn), sức rồng, khúc sông hẹp, mùa sen nở.
- * Game gửi sự kiện (Ev) cho useGame.ts để đọc lời bình; trang stage vẽ theo View.
+ * Điểm nâng cấp cốt lõi:
+ * - Đổi ghe quê hương thông minh (sau 45s cooldown, chống khóa chết khi gõ nhầm)
+ * - Bảo lưu Tim & Quà tặng cho khách mới chưa kịp gõ tên tỉnh (gõ tỉnh sau được cộng bù ngay)
+ * - Cơ chế Quân số Thực chiến (tự cho nghỉ tay chèo treo máy > 6 phút để chống "ghe ma" Cấp 3 ảo)
+ * - Gõ bình luận cổ vũ trên ghe (+3m mỗi 8s) tăng tương tác comment phòng LIVE
+ * - Vinh danh Hoàng Sa / Trường Sa & Đảo tiền tiêu Tổ quốc
+ * - Bảng vàng Tỉnh Hôm Nay + Bảng vàng Tuần + Cấp bậc Thủy Thủ Trọn Đời
+ * - Chế độ Lễ Thu Quân Hạ Thủy (`nghiLive`) chào tạm biệt & chốt Follow cuối buổi
  */
-import { GAME, capCua, danhHieu, giayTangToc } from './config';
-import { TINH_BY_ID, plain, tenCu, timTinh } from './tinh';
+import { GAME, capBacTronDoi, capCua, danhHieu, giayTangToc } from './config';
+import { TINH_BY_ID, plain, tenCu, tenDao, timTinh } from './tinh';
 import { CHANG, CHANG_BY_ID, type Chang } from './chang';
 
-export type Phase = 'chuyen' | 'dua' | 'ketQua' | 'sacPhong' | 'chonSong';
+export type Phase = 'chuyen' | 'dua' | 'ketQua' | 'sacPhong' | 'chonSong' | 'nghiLive';
 
 interface Nguoi {
   id: string;
   name: string;
   avatar: string;
   tinh: string;
-  nhip: number; // tim trong vòng này
+  nhip: number; // tim trong vòng hiện tại
+  tongNhipBuoi: number; // tổng tim cả buổi live
+  lenLuc: number; // thời điểm vào ghe hiện tại (để tính cooldown đổi ghe)
+  hoatDong: number; // lần tương tác gần nhất (để lọc ghe ma)
+  hoLuc: number; // lần gõ cổ vũ gần nhất
+  active: boolean; // đang có mặt trên ghe
 }
 
 interface Ghe {
@@ -28,9 +37,9 @@ interface Ghe {
   cap: number;
   tangTocDen: number;
   sucRongDen: number;
-  hoatDong: number; // lần cuối có người lên / chèo / tặng
+  hoatDong: number;
   nhipVong: number;
-  toc: number; // tốc độ hiện tại (m/giây, làm mượt ~2,5 giây): để vẽ ghe nhanh / ghe chậm
+  toc: number;
   mTruoc: number;
 }
 
@@ -42,7 +51,7 @@ type SuKien =
 
 export type Ev =
   | { t: 'chuyen'; chang: string; nha: string }
-  | { t: 'len'; name: string; tinh: string; tinhMoi: boolean }
+  | { t: 'len'; name: string; tinh: string; tinhMoi: boolean; doiGhe?: boolean; daoBienDong?: string }
   | { t: 'lenCap'; tinh: string; cap: string }
   | { t: 'caChep'; tinh: string }
   | { t: 'vuMon'; tinh: string }
@@ -59,7 +68,10 @@ export type Ev =
   | { t: 'chonSong'; ten: string[] }
   | { t: 'chotSong'; chang: string }
   | { t: 'qua'; name: string; tinh: string | null; giay: number; coins: number }
-  | { t: 'thang'; tinh: string }; // để useGame ghi bảng vàng hôm nay
+  | { t: 'congBu'; name: string; tinh: string; giay: number; tim: number }
+  | { t: 'thang'; tinh: string }
+  | { t: 'luuTayCheo'; list: { id: string; name: string; tinh: string; nhip: number }[]; mvpId: string }
+  | { t: 'nghiLive'; topTinh: string };
 
 export type MauBanner = 'vang' | 'hong' | 'xanh' | 'trang' | 'do';
 interface Banner {
@@ -77,9 +89,9 @@ export interface GheView {
   hang: number;
   cap: number;
   so: number;
-  lan: number; // 0-5 trên đường đua chính, -1 = đoàn đang đuổi
-  toc: number; // m/giây hiện tại
-  tocTB: number; // tốc độ trung bình các ghe đang đua
+  lan: number;
+  toc: number;
+  tocTB: number;
   tangToc: boolean;
   sucRong: boolean;
   sanNha: boolean;
@@ -89,27 +101,46 @@ export interface GheView {
 export interface View {
   phase: Phase;
   vong: number;
-  con: number; // giây còn lại (đua: của vòng; nghỉ: tới vòng sau)
+  con: number;
   nuocRut: boolean;
-  chang: { id: string; ten: string; sao: number; nha: string; kieu: string };
+  chang: { id: string; ten: string; sao: number; nha: string };
   ghe: GheView[];
   soDangDua: number;
   dauCach: number;
-  conLenSong: number; // ghe hạng 7 còn bao nhiêu mét để lên đường đua chính
+  conLenSong: number;
   banner: Banner | null;
   pills: string[];
-  toast: { id: number; text: string; tinh: string } | null;
+  toast: { id: number; text: string; tinh: string; phu?: string } | null;
   ticker: { id: number; text: string } | null;
   benCho: string[];
   hoChe: { id: number; tinh: string; text: string }[];
   timNguoi: { id: number; tinh: string; name: string }[];
   daiChien: { a: string; b: string; ma: number; mb: number } | null;
-  dauBox: { tinh: string; cach: number; duoi: string } | null; // nước rút: "CẦN THƠ DẪN 76 M · An Giang đang đuổi"
-  ketQua: { top: { tinh: string; ten: string; m: number }[]; lienTiep: number; bang: { ten: string; n: number }[] } | null;
-  sacPhong: { name: string; avatar: string; tinh: string; nhip: number; danhHieu: string; top: { name: string; tinh: string; nhip: number }[] } | null;
+  dauBox: { tinh: string; cach: number; duoi: string } | null;
+  ketQua: {
+    top: { tinh: string; ten: string; m: number }[];
+    lienTiep: number;
+    bang: { ten: string; n: number }[];
+    bangTuan: { ten: string; n: number }[];
+  } | null;
+  sacPhong: {
+    name: string;
+    avatar: string;
+    tinh: string;
+    nhip: number;
+    danhHieu: string;
+    capTronDoi: string;
+    top: { name: string; tinh: string; nhip: number }[];
+  } | null;
   chonSong: { ds: { id: string; ten: string; mo: string; goi: string; phieu: number }[]; con: number } | null;
+  nghiLive: {
+    vongDaDua: number;
+    tongTayCheo: number;
+    bang: { ten: string; n: number }[];
+    bangTuan: { ten: string; n: number }[];
+    topTayCheo: { name: string; tinh: string; nhip: number }[];
+  } | null;
   quaLon: { id: number; name: string; gift: string; count: number } | null;
-  khauHieu: string;
   songHep: boolean;
   senNo: boolean;
 }
@@ -122,13 +153,16 @@ export class DuaGhe {
   phase: Phase = 'chuyen';
   vong = 0;
   endsAt = 0;
+  duaSec = GAME.duaSec;
+  choDoiGhe = true;
   private startAt = 0;
   private lastTick = 0;
   chang: Chang = CHANG[0];
-  private changDaDua = new Map<string, number>(); // chặng -> vòng gần nhất đã đua
+  private changDaDua = new Map<string, number>();
 
   nguoi = new Map<string, Nguoi>();
   ghe = new Map<string, Ghe>();
+  private treo = new Map<string, { tim: number; giay: number; at: number }>();
   private lan = new Map<string, number>();
   private xep: Ghe[] = [];
 
@@ -145,8 +179,8 @@ export class DuaGhe {
 
   private banners: Banner[] = [];
   private banner: (Banner & { den: number }) | null = null;
-  private toasts: { text: string; tinh: string }[] = [];
-  private toast: { id: number; text: string; tinh: string; den: number } | null = null;
+  private toasts: { text: string; tinh: string; phu?: string }[] = [];
+  private toast: { id: number; text: string; tinh: string; phu?: string; den: number } | null = null;
   private tickers: string[] = [];
   private ticker: { id: number; text: string; den: number } | null = null;
   private benCho: string[] = [];
@@ -156,14 +190,17 @@ export class DuaGhe {
   private quaLon: { id: number; name: string; gift: string; count: number; den: number } | null = null;
   private seq = 1;
 
-  // kết quả
   private thangCuoi = '';
   private lienTiep = 0;
-  bang: Record<string, number> = {}; // bảng vàng hôm nay (useGame đồng bộ với server)
+  bang: Record<string, number> = {};
+  bangTuan: Record<string, number> = {};
+  hoSo: Record<string, { tongNhip: number; sacPhong: number }> = {};
+
   private ketQua: View['ketQua'] = null;
   private sacPhong: View['sacPhong'] = null;
   private chon: { ds: { id: string; mo: string; phieu: number }[]; daBau: Set<string> } | null = null;
   private changSau: Chang | null = null;
+  private nghiLiveData: View['nghiLive'] = null;
 
   private evs: Ev[] = [];
 
@@ -172,72 +209,197 @@ export class DuaGhe {
     this.chuyen(now);
   }
 
-  /** Sự kiện cho giọng bình luận (lấy xong là xoá) */
   lay(): Ev[] {
     const e = this.evs;
     this.evs = [];
     return e;
   }
 
-  // ---------- Người xem ----------
+  setDuaSec(sec: number, now = Date.now()) {
+    const next = Math.min(360, Math.max(60, Math.round(sec) || GAME.duaSec));
+    if (next === this.duaSec) return;
+    this.duaSec = next;
+    if (this.phase === 'dua') {
+      const elapsed = Math.max(0, now - this.startAt);
+      this.endsAt = Math.max(now + 5000, this.startAt + this.duaSec * 1000 - (elapsed > this.duaSec * 1000 ? elapsed : 0));
+    }
+  }
 
-  /** Bình luận: chọn sông (lúc chọn sông) hoặc gõ tên tỉnh để lên ghe */
+  // ---------- Tương tác người xem ----------
+
   chat(p: { id: string; name: string; avatar?: string; comment: string }, now = Date.now()) {
+    if (this.phase === 'nghiLive') return;
+
+    let daBauSong = false;
     if (this.phase === 'chonSong' && this.chon && !this.chon.daBau.has(p.id)) {
       const c = plain(p.comment);
       const x = this.chon.ds.find((d) => CHANG_BY_ID.get(d.id)!.goi.some((g) => c.includes(plain(g))));
       if (x) {
         x.phieu++;
         this.chon.daBau.add(p.id);
-        return;
+        daBauSong = true;
       }
     }
+
     const old = this.nguoi.get(p.id);
+    const tinhGoi = timTinh(p.comment);
+
     if (old) {
-      // đã lên ghe: chỉ cập nhật tên, không đổi ghe ("Gõ tên tỉnh chỉ 1 lần")
       old.name = p.name;
+      if (p.avatar) old.avatar = p.avatar;
+      this.kichHoatNguoi(old, now);
+      if (daBauSong) return;
+
+      // Cho phép đổi sang ghe tỉnh khác nếu đã qua thời gian chờ 45s (chống khóa chết khi gõ nhầm)
+      if (tinhGoi && tinhGoi !== old.tinh && this.choDoiGhe && now - old.lenLuc >= GAME.doiGheSauMs) {
+        const tinhCu = old.tinh;
+        old.tinh = tinhGoi;
+        old.lenLuc = now;
+        this.capNhatQuanSo(tinhCu);
+        this.duaVaoGhe(old, p.comment, now, true);
+        return;
+      }
+
+      // Đã ở trên ghe mà bình luận cổ vũ trong lúc đua -> cộng 3m khích lệ mỗi 8 giây
+      if (this.phase === 'dua' && now - old.hoLuc >= GAME.hoCooldownMs) {
+        const g = this.ghe.get(old.tinh);
+        if (g) {
+          old.hoLuc = now;
+          g.hoatDong = now;
+          const met = GAME.metMoiHo * this.heSo(g, now);
+          g.m += met;
+          g.nhipVong += 2;
+          old.nhip += 2;
+          old.tongNhipBuoi += 2;
+          if (now - (this.hoCheLuc.get(g.tinh) ?? 0) > 1800) {
+            this.hoCheLuc.set(g.tinh, now);
+            this.hoChe.push({
+              id: this.seq++,
+              tinh: g.tinh,
+              text: GAME.hoChe[Math.floor(Math.random() * GAME.hoChe.length)],
+              den: now + 1800,
+            });
+          }
+        }
+      }
       return;
     }
-    const tinh = timTinh(p.comment);
-    if (!tinh) return;
-    this.len({ id: p.id, name: p.name, avatar: p.avatar ?? '', tinh }, p.comment, now);
+
+    if (!tinhGoi) return;
+    const moi: Nguoi = {
+      id: p.id,
+      name: p.name,
+      avatar: p.avatar ?? '',
+      tinh: tinhGoi,
+      nhip: 0,
+      tongNhipBuoi: 0,
+      lenLuc: now,
+      hoatDong: now,
+      hoLuc: 0,
+      active: true,
+    };
+    this.nguoi.set(p.id, moi);
+    this.duaVaoGhe(moi, p.comment, now, false);
   }
 
-  private len(p: { id: string; name: string; avatar: string; tinh: string }, comment: string, now: number) {
-    this.nguoi.set(p.id, { ...p, nhip: 0 });
-    let g = this.ghe.get(p.tinh);
-    const tinhMoi = !g || now - g.hoatDong > GAME.nghiDuaSauMs;
+  private kichHoatNguoi(n: Nguoi, now: number) {
+    n.hoatDong = now;
+    if (!n.active) {
+      n.active = true;
+      this.capNhatQuanSo(n.tinh);
+    }
+  }
+
+  private capNhatQuanSo(tinhId: string) {
+    const g = this.ghe.get(tinhId);
+    if (!g) return;
+    let count = 0;
+    for (const n of this.nguoi.values()) {
+      if (n.tinh === tinhId && n.active) count++;
+    }
+    g.nguoi = count;
+    g.cap = capCua(count);
+  }
+
+  private duaVaoGhe(n: Nguoi, comment: string, now: number, doiGhe: boolean) {
+    let g = this.ghe.get(n.tinh);
+    const tinhMoi = !g || g.nguoi === 0 || now - g.hoatDong > GAME.nghiDuaSauMs;
     if (!g) {
-      // ghe mới hạ thủy giữa vòng: xuất phát ngang ghe cuối đoàn
       const dangDua = this.dangDua(now);
       const cuoi = dangDua.length ? Math.min(...dangDua.map((x) => x.m)) : 0;
       const m0 = this.phase === 'dua' ? cuoi : 0;
-      g = { tinh: p.tinh, m: m0, nguoi: 0, cap: 0, tangTocDen: 0, sucRongDen: 0, hoatDong: now, nhipVong: 0, toc: 0, mTruoc: m0 };
-      this.ghe.set(p.tinh, g);
+      g = { tinh: n.tinh, m: m0, nguoi: 0, cap: 0, tangTocDen: 0, sucRongDen: 0, hoatDong: now, nhipVong: 0, toc: 0, mTruoc: m0 };
+      this.ghe.set(n.tinh, g);
     }
-    g.nguoi++;
+    const capCu = g.cap;
+    this.capNhatQuanSo(n.tinh);
     g.hoatDong = now;
-    const ten = tenTinh(p.tinh);
-    this.toasts.push({ text: `${rutGon(p.name, 16).toUpperCase()} ĐÃ LÊN GHE ${ten.toUpperCase()}`, tinh: p.tinh });
-    const cu = tenCu(comment, p.tinh);
-    const t = TINH_BY_ID.get(p.tinh)!;
-    this.tickers.push(`${rutGon(p.name, 14)} vào ghe ${ten} · ${cu ? `${cu} nay là ${ten}` : t.chao}`);
-    this.ganBenCho(p.name);
-    this.evs.push({ t: 'len', name: p.name, tinh: ten, tinhMoi });
-    const cap = capCua(g.nguoi);
-    if (cap > g.cap) {
-      g.cap = cap;
-      const tenCap = GAME.tenCap[cap];
+
+    const ten = tenTinh(n.tinh);
+    const daoInfo = tenDao(comment, n.tinh);
+    const cu = tenCu(comment, n.tinh);
+    const t = TINH_BY_ID.get(n.tinh)!;
+    const hs = this.hoSo[n.id];
+    const huyHieu = hs && hs.tongNhip >= 200 ? ` (${capBacTronDoi(hs.tongNhip).split('·')[1]?.trim() ?? ''})` : '';
+
+    this.toasts.push({
+      text: `${rutGon(n.name, 15).toUpperCase()} ${doiGhe ? 'CHUYỂN SANG' : 'ĐÃ LÊN'} GHE ${ten.toUpperCase()}`,
+      tinh: n.tinh,
+      phu: daoInfo?.bienDong ? `🇻🇳 Tự hào ${daoInfo.dao} thân yêu · Thả tim ♥ để chèo!` : undefined,
+    });
+
+    const moTaQue = daoInfo ? `${daoInfo.dao} thuộc ${ten}` : cu ? `${cu} nay về chung ${ten}` : t.chao;
+    this.tickers.push(`${rutGon(n.name, 14)}${huyHieu} vào ghe ${ten} · ${moTaQue}`);
+    this.ganBenCho(n.name);
+
+    this.evs.push({
+      t: 'len',
+      name: n.name,
+      tinh: ten,
+      tinhMoi: tinhMoi && !doiGhe,
+      doiGhe,
+      daoBienDong: daoInfo?.bienDong ? daoInfo.dao : undefined,
+    });
+
+    // Áp dụng ngay Tim & Quà bảo lưu (nếu khách lỡ thả tim / tặng quà trước khi gõ tên tỉnh)
+    const pending = this.treo.get(n.id);
+    if (pending && now - pending.at < GAME.treoHetHanMs) {
+      this.treo.delete(n.id);
+      if (pending.tim > 0 && this.phase === 'dua') {
+        const met = pending.tim * GAME.metMoiTim * this.heSo(g, now);
+        g.m += met;
+        g.nhipVong += pending.tim;
+        n.nhip += pending.tim;
+        n.tongNhipBuoi += pending.tim;
+      }
+      if (pending.giay > 0) {
+        g.tangTocDen = Math.max(g.tangTocDen, now) + pending.giay * 1000;
+        this.tickers.unshift(`⚡ Cộng bù tiếp sức của ${rutGon(n.name, 14)} · Ghe ${ten} TĂNG TỐC ${pending.giay}s!`);
+        this.evs.push({ t: 'congBu', name: n.name, tinh: ten, giay: pending.giay, tim: pending.tim });
+      }
+    }
+
+    if (g.cap > capCu) {
+      const tenCap = GAME.tenCap[g.cap];
       this.phat({ tieuDe: 'LÊN CẤP!', phu: `${ten} · ${tenCap}`, mau: 'vang' });
       this.tickers.push(`${ten} LÊN CẤP · ${tenCap.toUpperCase()}`);
       this.evs.push({ t: 'lenCap', tinh: ten, cap: tenCap });
     }
   }
 
-  /** Thả tim: người đã lên ghe thì ghe chèo thêm mét */
+  /** Thả tim: người đã lên ghe thì chèo thêm mét; chưa lên ghe thì giữ tạm vào kho chờ */
   tim(id: string, so: number, now = Date.now()) {
+    if (so <= 0 || this.phase === 'nghiLive') return;
     const n = this.nguoi.get(id);
-    if (!n || so <= 0) return;
+    if (!n) {
+      const cur = this.treo.get(id) ?? { tim: 0, giay: 0, at: now };
+      cur.tim = Math.min(GAME.treoTimMax, cur.tim + so);
+      cur.at = now;
+      this.treo.set(id, cur);
+      if (this.treo.size > 500) this.treo.delete(this.treo.keys().next().value!);
+      return;
+    }
+    this.kichHoatNguoi(n, now);
     const g = this.ghe.get(n.tinh);
     if (!g) return;
     g.hoatDong = now;
@@ -246,9 +408,9 @@ export class DuaGhe {
     g.m += met;
     g.nhipVong += so;
     n.nhip += so;
+    n.tongNhipBuoi += so;
     this.timGanDay.push({ at: now, id, n: so });
     for (const sk of this.suKien) if (sk.loai === 'caChep' && sk.tinh === g.tinh) sk.co += so;
-    // tiếng hô trên ghe + tên người chèo bay lên
     if (now - (this.hoCheLuc.get(g.tinh) ?? 0) > 2500 && Math.random() < 0.35) {
       this.hoCheLuc.set(g.tinh, now);
       this.hoChe.push({ id: this.seq++, tinh: g.tinh, text: GAME.hoChe[Math.floor(Math.random() * GAME.hoChe.length)], den: now + 1800 });
@@ -259,9 +421,11 @@ export class DuaGhe {
     this.ganBenCho(n.name);
   }
 
-  /** Tặng quà: ghe của người tặng tăng tốc theo số xu */
+  /** Tặng quà: ghe người tặng bứt tốc ngay; nếu chưa gõ tỉnh thì bảo lưu số giây tăng tốc */
   qua(p: { id: string; name: string; gift: string; count: number; coins: number }, now = Date.now()) {
+    if (this.phase === 'nghiLive') return;
     const n = this.nguoi.get(p.id);
+    if (n) this.kichHoatNguoi(n, now);
     const g = n && this.ghe.get(n.tinh);
     const giay = Math.min(GAME.tangTocMaxSec, giayTangToc(p.coins));
     const ten = g ? tenTinh(g.tinh) : null;
@@ -270,8 +434,12 @@ export class DuaGhe {
       g.tangTocDen = Math.max(g.tangTocDen, now) + giay * 1000;
       g.hoatDong = now;
       this.tickers.unshift(`${rutGon(p.name, 14)} tặng ${p.gift}${so} · Ghe ${ten} TĂNG TỐC ${giay} giây`);
-    } else {
-      this.tickers.unshift(`${rutGon(p.name, 14)} tặng ${p.gift}${so} · gõ tên tỉnh để quà đẩy ghe quê nhé`);
+    } else if (giay > 0) {
+      const cur = this.treo.get(p.id) ?? { tim: 0, giay: 0, at: now };
+      cur.giay = Math.min(GAME.tangTocMaxSec, cur.giay + giay);
+      cur.at = now;
+      this.treo.set(p.id, cur);
+      this.tickers.unshift(`🎁 Đã giữ +${cur.giay}s tăng tốc cho ${rutGon(p.name, 14)} · Gõ tên tỉnh quê bạn ngay!`);
     }
     if (p.coins >= GAME.quaLonXu) this.quaLon = { id: this.seq++, name: p.name, gift: p.gift, count: p.count, den: now + 3500 };
     this.evs.push({ t: 'qua', name: p.name, tinh: ten, giay, coins: p.coins });
@@ -282,28 +450,30 @@ export class DuaGhe {
   tick(now = Date.now()) {
     const dt = this.lastTick ? Math.min(1, (now - this.lastTick) / 1000) : 0;
     this.lastTick = now;
+    if (this.phase === 'nghiLive') return;
+
     this.lamMoiHang(now);
 
     if (this.phase === 'dua') this.chayDua(dt, now);
-    if (dt > 0)
+    if (dt > 0) {
       for (const g of this.ghe.values()) {
         const tuc = this.phase === 'dua' ? Math.max(0, g.m - g.mTruoc) / dt : 0;
         g.toc += (tuc - g.toc) * Math.min(1, dt / 2.5);
         g.mTruoc = g.m;
       }
+    }
     if (now >= this.endsAt) this.sang(now);
 
-    // màn hình: banner, toast, ticker
     if (this.banner && now >= this.banner.den) this.banner = null;
     if (!this.banner && this.banners.length) this.banner = { ...this.banners.shift()!, den: now + 2600 };
     if (this.toast && now >= this.toast.den) this.toast = null;
     if (!this.toast && this.toasts.length) {
       if (this.toasts.length > 4) {
         const n = this.toasts.length;
-        this.toasts = [{ text: `+${n} NGƯỜI VỪA LÊN GHE`, tinh: this.toasts[n - 1].tinh }];
+        this.toasts = [{ text: `+${n} TAY CHÈO VỪA LÊN GHE`, tinh: this.toasts[n - 1].tinh }];
       }
       const t = this.toasts.shift()!;
-      this.toast = { id: this.seq++, ...t, den: now + 1700 };
+      this.toast = { id: this.seq++, ...t, den: now + 1800 };
     }
     if (this.ticker && now >= this.ticker.den) this.ticker = null;
     if (!this.ticker && this.tickers.length) {
@@ -317,7 +487,6 @@ export class DuaGhe {
   }
 
   private chayDua(dt: number, now: number) {
-    // trôi + tăng tốc
     for (const g of this.dangDua(now)) {
       const f = this.heSo(g, now);
       g.m += GAME.troiGiay * dt * f;
@@ -327,7 +496,6 @@ export class DuaGhe {
     const xep = this.xep;
     const con = (this.endsAt - now) / 1000;
 
-    // đổi ngôi đầu
     const dau = xep[0];
     if (dau && this.dauCu && dau.tinh !== this.dauCu && now - this.startAt > 6000 && now - this.vuotLuc > 6000 && dau.m > 5) {
       this.vuotLuc = now;
@@ -336,13 +504,11 @@ export class DuaGhe {
     }
     if (dau) this.dauCu = dau.tinh;
 
-    // đại chiến 2 ghe đầu
     if (xep.length >= 2 && xep[1].m > 30 && xep[0].m - xep[1].m < GAME.daiChienCach && now - this.daiChienLuc > 40_000) {
       this.daiChienLuc = now;
       this.evs.push({ t: 'daiChien', a: tenTinh(xep[0].tinh), b: tenTinh(xep[1].tinh) });
     }
 
-    // sự kiện đang chạy
     for (const sk of this.suKien) {
       if (sk.loai === 'caChep' && sk.co >= sk.can) {
         const g = this.ghe.get(sk.tinh);
@@ -351,7 +517,7 @@ export class DuaGhe {
           const truoc = i > 0 ? xep[i - 1] : null;
           const nhay = Math.min(GAME.vuMonToiDa, Math.max(30, truoc ? truoc.m - g.m + 12 : 30));
           g.m += nhay;
-          g.mTruoc += nhay * 0.7; // vẫn trông lao nhanh nhưng không vọt quá đà
+          g.mTruoc += nhay * 0.7;
           this.phat({ tieuDe: 'VƯỢT VŨ MÔN!', phu: `ghe ${tenTinh(g.tinh)} lao lên`, mau: 'vang' });
           this.evs.push({ t: 'vuMon', tinh: tenTinh(g.tinh) });
         }
@@ -364,20 +530,17 @@ export class DuaGhe {
     }
     this.suKien = this.suKien.filter((sk) => sk.den > now);
 
-    // sự kiện mới (không mở trong nước rút)
     if (now >= this.suKienSau && con > GAME.nuocRutSec + 4) {
       this.moSuKien(now);
       this.suKienSau = now + rand(GAME.suKienSau[0], GAME.suKienSau[1]) * 1000;
     }
 
-    // nước rút
     if (!this.daNuocRut && con <= GAME.nuocRutSec) {
       this.daNuocRut = true;
       this.phat({ tieuDe: 'NƯỚC RÚT!', phu: '30 giây cuối · thả tim thật mạnh', mau: 'hong' });
       if (dau) this.evs.push({ t: 'nuocRut', dau: tenTinh(dau.tinh), cach: Math.round(dau.m - (xep[1]?.m ?? 0)) });
     }
     if (this.daNuocRut && now - this.tiepSucLuc > 4500) {
-      // người chèo nhiều nhất 4 giây qua được xướng tên
       const dem = new Map<string, number>();
       for (const x of this.timGanDay) if (now - x.at < 4000) dem.set(x.id, (dem.get(x.id) ?? 0) + x.n);
       const best = [...dem.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -393,6 +556,37 @@ export class DuaGhe {
     }
   }
 
+  /** Cho phép chủ kênh bấm kích hoạt thử sự kiện ngay trên Dashboard */
+  kichHoatSuKien(loai: 'caChep' | 'sucRong' | 'songHep' | 'senNo', now = Date.now()) {
+    if (this.phase !== 'dua') return;
+    this.lamMoiHang(now);
+    const xep = this.xep;
+    if (loai === 'caChep' && xep.length >= 1) {
+      const g = xep[Math.min(1, xep.length - 1)];
+      const can = GAME.caChepTim(g.nguoi);
+      this.suKien = this.suKien.filter((s) => s.loai !== 'caChep');
+      this.suKien.push({ loai: 'caChep', tinh: g.tinh, can, co: 0, den: now + GAME.caChepGiay * 1000 });
+      this.phat({ tieuDe: 'CÁ CHÉP VÀNG!', phu: `ghe ${tenTinh(g.tinh)} · thả tim để VƯỢT VŨ MÔN`, mau: 'vang' });
+      this.evs.push({ t: 'caChep', tinh: tenTinh(g.tinh) });
+    } else if (loai === 'sucRong' && xep.length >= 1) {
+      const g = xep[Math.floor(Math.random() * xep.length)];
+      g.sucRongDen = now + GAME.sucRongGiay * 1000;
+      this.suKien.push({ loai: 'sucRong', tinh: g.tinh, den: g.sucRongDen });
+      this.phat({ tieuDe: 'SỨC RỒNG!', phu: `${tenTinh(g.tinh)} nhanh hơn 20% · ${GAME.sucRongGiay} giây`, mau: 'vang' });
+      this.evs.push({ t: 'sucRong', tinh: tenTinh(g.tinh) });
+    } else if (loai === 'songHep') {
+      this.suKien = this.suKien.filter((s) => s.loai !== 'songHep');
+      this.suKien.push({ loai: 'songHep', den: now + GAME.songHepGiay * 1000 });
+      this.phat({ tieuDe: 'KHÚC SÔNG HẸP!', phu: 'bờ lấn vào · giữ vị trí, lách qua nào', mau: 'xanh' });
+      this.evs.push({ t: 'songHep' });
+    } else if (loai === 'senNo') {
+      this.suKien = this.suKien.filter((s) => s.loai !== 'senNo');
+      this.suKien.push({ loai: 'senNo', den: now + GAME.senNoGiay * 1000 });
+      this.phat({ tieuDe: 'MÙA SEN NỞ!', phu: 'sen nở đón đoàn sau · ghe ngoài top 3 chèo được gấp đôi mét', mau: 'vang' });
+      this.evs.push({ t: 'senNo' });
+    }
+  }
+
   private moSuKien(now: number) {
     const xep = this.xep;
     if (xep.length < 2) return;
@@ -404,7 +598,7 @@ export class DuaGhe {
     if (!coGlobal) ds.push(['songHep', 2]);
     if (!coGlobal && xep.length >= 4) ds.push(['senNo', 2]);
     const loc = ds.filter(([l]) => l !== this.suKienCuoi);
-    const chon = boc(loc.length ? loc : ds);
+    const chon = boc(loc.length ? loc : ds) as 'caChep' | 'sucRong' | 'songHep' | 'senNo' | undefined;
     if (!chon) return;
     this.suKienCuoi = chon;
     if (chon === 'caChep') {
@@ -430,7 +624,6 @@ export class DuaGhe {
     }
   }
 
-  /** Hệ số tốc độ của ghe lúc này */
   private heSo(g: Ghe, now: number) {
     let f = 1 + (GAME.capThuong[g.cap] ?? 0);
     if (g.tinh === this.chang.nha) f *= GAME.sanNha;
@@ -450,7 +643,9 @@ export class DuaGhe {
       if (this.sacPhong) {
         const s = this.sacPhong;
         this.evs.push({ t: 'sacPhong', name: s.name, tinh: s.tinh, nhip: s.nhip, danhHieu: s.danhHieu });
-      } else this.sang(now); // không ai chèo: bỏ qua sắc phong
+      } else {
+        this.sang(now);
+      }
       return;
     }
     if (this.phase === 'sacPhong') return this.moChonSong(now);
@@ -466,15 +661,27 @@ export class DuaGhe {
     }
   }
 
-  /** Màn giới thiệu chặng trước khi xuất phát */
   private chuyen(now: number) {
     if (this.changSau) this.chang = this.changSau;
     this.changSau = null;
+    this.nghiLiveData = null;
     this.phase = 'chuyen';
     this.vong++;
     this.endsAt = now + GAME.chuyenSec * 1000;
     this.ketQua = null;
     this.sacPhong = null;
+
+    // Lọc tay chèo đã rời phòng (> 6 phút không tương tác) để chống "ghe ma" Cấp 3 ảo
+    const tinhCanTinhLai = new Set<string>();
+    for (const n of this.nguoi.values()) {
+      n.nhip = 0;
+      if (n.active && now - n.hoatDong > GAME.nghiNguoiSauMs) {
+        n.active = false;
+        tinhCanTinhLai.add(n.tinh);
+      }
+    }
+    for (const tid of tinhCanTinhLai) this.capNhatQuanSo(tid);
+
     for (const g of this.ghe.values()) {
       g.m = 0;
       g.mTruoc = 0;
@@ -483,7 +690,6 @@ export class DuaGhe {
       g.tangTocDen = 0;
       g.sucRongDen = 0;
     }
-    for (const n of this.nguoi.values()) n.nhip = 0;
     this.suKien = [];
     this.banners = [];
     this.banner = null;
@@ -496,7 +702,7 @@ export class DuaGhe {
   private batDauDua(now: number) {
     this.phase = 'dua';
     this.startAt = now;
-    this.endsAt = now + GAME.duaSec * 1000;
+    this.endsAt = now + this.duaSec * 1000;
     this.suKienSau = now + 8000;
   }
 
@@ -508,16 +714,38 @@ export class DuaGhe {
       this.lienTiep = w === this.thangCuoi ? this.lienTiep + 1 : 1;
       this.thangCuoi = w;
       this.bang[w] = (this.bang[w] ?? 0) + 1;
+      this.bangTuan[w] = (this.bangTuan[w] ?? 0) + 1;
       this.evs.push({ t: 'thang', tinh: w });
     }
     this.ketQua = {
       top: top.map((g) => ({ tinh: g.tinh, ten: tenTinh(g.tinh), m: Math.round(g.m) })),
       lienTiep: top[0] ? this.lienTiep : 0,
-      bang: this.bangVang(),
+      bang: this.topBang(this.bang),
+      bangTuan: this.topBang(this.bangTuan),
     };
-    this.evs.push({ t: 'ketQua', top: top.map((g) => ({ tinh: tenTinh(g.tinh), m: Math.round(g.m) })), lienTiep: this.ketQua.lienTiep });
+    this.evs.push({
+      t: 'ketQua',
+      top: top.map((g) => ({ tinh: tenTinh(g.tinh), m: Math.round(g.m) })),
+      lienTiep: this.ketQua.lienTiep,
+    });
+
     const rowers = [...this.nguoi.values()].filter((n) => n.nhip > 0).sort((a, b) => b.nhip - a.nhip);
     const best = rowers[0];
+    if (rowers.length > 0) {
+      for (const r of rowers) {
+        const cur = this.hoSo[r.id] ?? { tongNhip: 0, sacPhong: 0 };
+        this.hoSo[r.id] = {
+          tongNhip: cur.tongNhip + r.nhip,
+          sacPhong: cur.sacPhong + (best && r.id === best.id ? 1 : 0),
+        };
+      }
+      this.evs.push({
+        t: 'luuTayCheo',
+        list: rowers.map((r) => ({ id: r.id, name: r.name, tinh: r.tinh, nhip: r.nhip })),
+        mvpId: best?.id ?? '',
+      });
+    }
+
     this.sacPhong = best
       ? {
           name: best.name,
@@ -525,9 +753,11 @@ export class DuaGhe {
           tinh: tenTinh(best.tinh),
           nhip: best.nhip,
           danhHieu: danhHieu(best.nhip),
+          capTronDoi: capBacTronDoi(this.hoSo[best.id]?.tongNhip ?? best.nhip),
           top: rowers.slice(0, 3).map((n) => ({ name: n.name, tinh: tenTinh(n.tinh), nhip: n.nhip })),
         }
       : null;
+
     this.phase = 'ketQua';
     this.endsAt = now + GAME.ketQuaSec * 1000;
     this.suKien = [];
@@ -538,37 +768,76 @@ export class DuaGhe {
     this.endsAt = now + GAME.chonSongSec * 1000;
     const nghi = (c: Chang) => c.id === this.chang.id || this.vong - (this.changDaDua.get(c.id) ?? -99) < GAME.changNghi;
     const conLai = CHANG.filter((c) => !nghi(c));
+    const pool = conLai.length >= 3 ? conLai : CHANG.filter((c) => c.id !== this.chang.id);
     const ds: { id: string; mo: string; phieu: number }[] = [];
-    // sân nhà của 2 tỉnh đông tay chèo nhất + 1 sông lạ
-    const dong = [...this.ghe.values()].filter((g) => now - g.hoatDong < GAME.nghiDuaSauMs).sort((a, b) => b.nguoi - a.nguoi);
+    const dong = [...this.ghe.values()].filter((g) => g.nguoi > 0 && now - g.hoatDong < GAME.nghiDuaSauMs).sort((a, b) => b.nguoi - a.nguoi);
     const nhan = ['đông tay chèo nhất', 'đông tay chèo nhì'];
     for (const g of dong) {
       if (ds.length >= 2) break;
-      const c = conLai.find((x) => x.nha === g.tinh && !ds.some((d) => d.id === x.id));
+      const c = pool.find((x) => x.nha === g.tinh && !ds.some((d) => d.id === x.id));
       if (c) ds.push({ id: c.id, mo: `sân nhà ${tenTinh(c.nha)} · ${nhan[ds.length]}`, phieu: 0 });
     }
-    for (const c of tron(conLai)) {
+    for (const c of tron(pool)) {
       if (ds.length >= 3) break;
-      if (!ds.some((d) => d.id === c.id)) ds.push({ id: c.id, mo: `sân nhà ${tenTinh(c.nha)} · sông lạ`, phieu: 0 });
+      if (!ds.some((d) => d.id === c.id)) ds.push({ id: c.id, mo: `sân nhà ${tenTinh(c.nha)} · chặng mới`, phieu: 0 });
     }
     this.chon = { ds, daBau: new Set() };
     this.evs.push({ t: 'chonSong', ten: ds.map((d) => CHANG_BY_ID.get(d.id)!.goi[0]) });
   }
 
-  // ---------- Lệnh chủ kênh ----------
+  // ---------- Lệnh của chủ kênh ----------
 
-  /** Vòng mới ngay (bỏ vòng đang chạy) */
   vongMoi(now = Date.now()) {
     this.chuyen(now);
   }
-  /** Nhảy tới nước rút (để thử) */
+
+  chonChangNgay(changId: string, now = Date.now()) {
+    const c = CHANG_BY_ID.get(changId);
+    if (!c) return;
+    this.changSau = c;
+    this.chuyen(now);
+  }
+
   toiNuocRut(now = Date.now()) {
     if (this.phase === 'dua') this.endsAt = now + (GAME.nuocRutSec + 1) * 1000;
   }
-  /** Xoá hết người và ghe (đầu buổi live mới) */
+
+  tatLive(now = Date.now()) {
+    // Nếu đang đua dở có ghe đã chạy thì chốt kết quả vòng hiện tại vào bảng vàng trước khi thu quân
+    this.lamMoiHang(now);
+    if (this.phase === 'dua' && this.xep[0] && this.xep[0].m > 15) {
+      const w = this.xep[0].tinh;
+      this.bang[w] = (this.bang[w] ?? 0) + 1;
+      this.bangTuan[w] = (this.bangTuan[w] ?? 0) + 1;
+      this.evs.push({ t: 'thang', tinh: w });
+    }
+    const bangHomNay = this.topBang(this.bang);
+    const bangTuan = this.topBang(this.bangTuan);
+    const topTayCheo = [...this.nguoi.values()]
+      .filter((n) => n.tongNhipBuoi > 0)
+      .sort((a, b) => b.tongNhipBuoi - a.tongNhipBuoi)
+      .slice(0, 3)
+      .map((n) => ({ name: n.name, tinh: tenTinh(n.tinh), nhip: n.tongNhipBuoi }));
+
+    this.phase = 'nghiLive';
+    this.endsAt = Infinity;
+    this.suKien = [];
+    this.banner = null;
+    this.banners = [];
+    this.nghiLiveData = {
+      vongDaDua: this.vong,
+      tongTayCheo: this.nguoi.size,
+      bang: bangHomNay,
+      bangTuan,
+      topTayCheo,
+    };
+    this.evs.push({ t: 'nghiLive', topTinh: bangHomNay[0]?.ten ?? bangTuan[0]?.ten ?? '' });
+  }
+
   xoaHet(now = Date.now()) {
     this.nguoi.clear();
     this.ghe.clear();
+    this.treo.clear();
     this.lan.clear();
     this.benCho = [];
     this.lienTiep = 0;
@@ -594,7 +863,6 @@ export class DuaGhe {
 
   private lamMoiHang(now: number) {
     this.xep = this.dangDua(now).sort((a, b) => b.m - a.m || b.nguoi - a.nguoi);
-    // làn cố định cho 6 ghe đầu: ghe đang ở làn nào giữ làn đó
     const top = new Set(this.xep.slice(0, GAME.soLan).map((g) => g.tinh));
     for (const t of [...this.lan.keys()]) if (!top.has(t)) this.lan.delete(t);
     const dung = new Set(this.lan.values());
@@ -606,8 +874,8 @@ export class DuaGhe {
     }
   }
 
-  private bangVang() {
-    return Object.entries(this.bang)
+  private topBang(src: Record<string, number>) {
+    return Object.entries(src)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
       .map(([t, n]) => ({ ten: tenTinh(t), n }));
@@ -616,7 +884,7 @@ export class DuaGhe {
   view(now = Date.now()): View {
     const xep = this.xep;
     const dau = xep[0];
-    const con = Math.max(0, Math.ceil((this.endsAt - now) / 1000));
+    const con = this.phase === 'nghiLive' ? 0 : Math.max(0, Math.ceil((this.endsAt - now) / 1000));
     const nghi =
       this.phase === 'ketQua' ? con + GAME.sacPhongSec + GAME.chonSongSec
       : this.phase === 'sacPhong' ? con + GAME.chonSongSec
@@ -661,14 +929,14 @@ export class DuaGhe {
       vong: this.vong,
       con: this.phase === 'dua' || this.phase === 'chuyen' ? con : nghi,
       nuocRut,
-      chang: { id: this.chang.id, ten: this.chang.ten, sao: this.chang.sao, nha: tenTinh(this.chang.nha), kieu: this.chang.kieu },
+      chang: { id: this.chang.id, ten: this.chang.ten, sao: this.chang.sao, nha: tenTinh(this.chang.nha) },
       ghe,
       soDangDua: xep.length,
       dauCach: dau ? Math.round(dau.m - (xep[1]?.m ?? 0)) : 0,
       conLenSong: thu7 && thu6 ? Math.max(1, Math.round(thu6.m - thu7.m)) : 0,
       banner: this.banner ? { id: this.banner.id, tieuDe: this.banner.tieuDe, phu: this.banner.phu, mau: this.banner.mau } : null,
       pills,
-      toast: this.toast ? { id: this.toast.id, text: this.toast.text, tinh: this.toast.tinh } : null,
+      toast: this.toast ? { id: this.toast.id, text: this.toast.text, tinh: this.toast.tinh, phu: this.toast.phu } : null,
       ticker: this.ticker ? { id: this.ticker.id, text: this.ticker.text } : null,
       benCho: this.benCho,
       hoChe: this.hoChe.map(({ id, tinh, text }) => ({ id, tinh, text })),
@@ -681,8 +949,8 @@ export class DuaGhe {
         this.phase === 'chonSong' && this.chon
           ? { ds: this.chon.ds.map((d) => ({ ...d, ten: songTen(d).ten, goi: songTen(d).goi[0] })), con }
           : null,
+      nghiLive: this.phase === 'nghiLive' ? this.nghiLiveData : null,
       quaLon: this.quaLon ? { id: this.quaLon.id, name: this.quaLon.name, gift: this.quaLon.gift, count: this.quaLon.count } : null,
-      khauHieu: '',
       songHep: this.suKien.some((s) => s.loai === 'songHep'),
       senNo: this.suKien.some((s) => s.loai === 'senNo'),
     };

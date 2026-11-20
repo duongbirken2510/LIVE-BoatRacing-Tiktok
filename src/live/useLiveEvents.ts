@@ -4,8 +4,7 @@ import { IS_STAGE, STAGE_ID } from './page';
 import { voice } from './voice';
 
 /**
- * Nghe sự kiện live từ server. Handler luôn là bản mới nhất (không lo state cũ),
- * tự kết nối lại khi rớt mạng.
+ * Nghe sự kiện live từ server qua SSE. Tự động kết nối lại khi rớt mạng.
  */
 export function useLiveEvents(handlers: LiveHandlers) {
   const ref = useRef(handlers);
@@ -38,8 +37,11 @@ export function useLiveEvents(handlers: LiveHandlers) {
       on('control', (d) => ref.current.onControl?.(d));
       on('gamestate', (d) => ref.current.onGameState?.(d));
       on('caiDat', (d) => ref.current.onCaiDat?.(d));
-      // trang stage bị trang mới hơn thay chỗ: im lặng hẳn và thôi gửi dữ liệu
-      on('speaker', (d) => IS_STAGE && voice.setSpeaker(d.id === STAGE_ID));
+      on('vieneu', (d) => ref.current.onVieneu?.(d));
+      on('speaker', (d) => {
+        ref.current.onStages?.(Number(d?.count) || 0);
+        if (IS_STAGE) voice.setSpeaker(d.id === STAGE_ID);
+      });
       source.onerror = () => {
         source?.close();
         if (!closed) retry = setTimeout(connect, 3000);

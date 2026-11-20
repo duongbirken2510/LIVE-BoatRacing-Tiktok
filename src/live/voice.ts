@@ -2,18 +2,16 @@ import { IS_STAGE, MUTE } from './page';
 import { containsBanned } from './bannedWords';
 
 /**
- * Hàng đợi giọng đọc. Chỉ phát trên trang stage.
- *   voice.say('Chào bạn A')            -> xếp cuối hàng
- *   voice.say('Cảm ơn quà', true)      -> ưu tiên, chen lên đầu (dùng cho quà)
- * Câu nào chờ quá lâu (mặc định 60 giây) thì bỏ, để không đọc chuyện đã cũ.
+ * Hàng đợi giọng đọc 2 làn ưu tiên (Priority & Normal) + Prefetch tuần tự.
+ * Có chốt chặn an toàn cuối cùng: tuyệt đối bỏ qua câu chứa từ vi phạm cộng đồng.
  */
 interface Line {
   text: string;
   at: number;
-  done?: () => void; // gọi khi đọc xong, lỗi, hoặc bị bỏ
+  done?: () => void;
 }
 
-const MAX_WAIT_MS = 60_000;
+const MAX_WAIT_MS = 45_000;
 const MAX_QUEUE = 30;
 
 class Voice {
@@ -25,33 +23,64 @@ class Voice {
   rate = 1;
   volume = 1;
   enabled = IS_STAGE && !MUTE;
-  /** Trang stage này có phải trang chính không (lỡ mở 2 trang stage thì trang cũ thành trang phụ: im lặng, không gửi dữ liệu) */
   speaker = true;
+
   setSpeaker(mine: boolean) {
     if (!mine && this.speaker) this.stop();
     this.speaker = mine;
     this.enabled = IS_STAGE && !MUTE && mine;
   }
+
+  setVolume(vol0to1: number) {
+    this.volume = Math.max(0, Math.min(1, vol0to1));
+    if (this.current) this.current.volume = this.volume;
+  }
+
   onBlocked?: () => void;
 
   say(text: string, priority = false, done?: () => void) {
-    if (!this.enabled || !text.trim()) return done?.();
+    const clean = text.trim();
+    if (!this.enabled || !clean || this.volume <= 0 || containsBanned(clean)) return done?.();
     const q = priority ? this.priority : this.normal;
-    q.push({ text: text.trim(), at: Date.now(), done });
+    q.push({ text: clean, at: Date.now(), done });
     if (q.length > MAX_QUEUE) q.shift()?.done?.();
     void this.next();
   }
 
-  /** Tạo giọng trước (server giữ sẵn), tới lúc đọc thì phát ngay không phải chờ */
   private daTao = new Set<string>();
+  private prefetchQueue: string[] = [];
+  private prefetching = false;
+
   prefetch(text: string) {
     const t = text.trim();
-    if (!this.enabled || !t || this.daTao.has(t)) return;
+    if (!this.enabled || !t || containsBanned(t) || this.daTao.has(t)) return;
     this.daTao.add(t);
     if (this.daTao.size > 300) this.daTao.clear();
-    fetch(`/api/tts?rate=${this.rate}&text=${encodeURIComponent(t)}`)
-      .then((r) => r.arrayBuffer())
-      .catch(() => this.daTao.delete(t));
+    this.prefetchQueue.unshift(t);
+    void this.runPrefetch();
+  }
+
+  private async runPrefetch() {
+    if (this.prefetching) return;
+    this.prefetching = true;
+    try {
+      while (this.prefetchQueue.length > 0) {
+        const t = this.prefetchQueue.shift()!;
+        try {
+          const r = await fetch(`/api/tts?prefetch=1&rate=${this.rate}&text=${encodeURIComponent(t)}`);
+          await r.arrayBuffer();
+        } catch {
+          this.daTao.delete(t);
+        }
+      }
+    } finally {
+      this.prefetching = false;
+    }
+  }
+
+  clearPrefetch() {
+    this.daTao.clear();
+    this.prefetchQueue = [];
   }
 
   stop() {
@@ -67,17 +96,14 @@ class Voice {
     return this.playing || this.normal.length + this.priority.length > 0;
   }
 
-  /** Số câu thường đang chờ (không tính câu đang đọc) */
   get waiting() {
     return this.normal.length;
   }
 
-  /** Số câu ưu tiên (quà) đang chờ */
   get waitingPriority() {
     return this.priority.length;
   }
 
-  /** Giọng đã im bao lâu (0 khi đang đọc hoặc còn câu chờ) */
   quietForMs(now = Date.now()) {
     return this.busy ? 0 : now - this.lastSpokeAt;
   }
@@ -87,7 +113,7 @@ class Voice {
     const now = Date.now();
     let line: Line | undefined;
     while ((line = this.priority.shift() ?? this.normal.shift())) {
-      if (now - line.at < MAX_WAIT_MS) break;
+      if (now - line.at < MAX_WAIT_MS && !containsBanned(line.text)) break;
       line.done?.();
     }
     if (!line) return;
@@ -100,7 +126,6 @@ class Voice {
         audio.onended = () => resolve();
         audio.onerror = () => resolve();
         audio.play().catch((e) => {
-          // Chrome chặn tự phát tiếng khi chưa bấm vào trang: báo để hiện nút "Bấm để bật tiếng"
           if (e?.name === 'NotAllowedError') this.onBlocked?.();
           resolve();
         });
@@ -117,4 +142,4 @@ class Voice {
 
 export const voice = new Voice();
 
-export { speakableName } from './names';
+export { speakableName, safeDisplayName } from './names';
